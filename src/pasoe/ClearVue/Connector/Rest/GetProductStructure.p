@@ -93,12 +93,15 @@ oDb    = NEW DatabaseConnection(oConfig).
 oQuery = NEW ProductStructureQuery(oConfig, oDb).
 iRows  = RunWithReconnect(oQuery, oDb, part, site).
 
-/* 5. 0 rows -> 404, else compose + 200 */
+/* 5. 0 rows -> 404 (part NOT in pt_mstr -- genuinely not found in the ERP).
+      A part that exists but has no BOM returns >=1 row (the root row) and 200,
+      NOT 404 -- see ProductStructureQuery's existence gate. */
 IF iRows = 0 THEN
     RETURN FailWith(WithCorr(
         ConnectorError:NotFound(
-            SUBSTITUTE("no product structure for part &1 at site &2":U, part, site)))).
+            SUBSTITUTE("part &1 not found in ERP for site &2":U, part, site)))).
 
+/* part exists -> 200 with the root row (plus children if any) */
 oComposer    = NEW ProductStructureJsonComposer().
 responseBody = oComposer:Compose(oQuery:GetResultsHandle()).
 RETURN "200":U.
