@@ -1,0 +1,357 @@
+# ClearVue ERP Connector Interface — v1 (CLEAN TARGET, DRAFT)
+#
+# This is the clean, consumer-driven target contract — designed from what ClearVue
+# SaaS actually consumes, NOT ported from the legacy adaptor's as-built shapes.
+# The connector emits these canonical names directly, so a stock deployment needs
+# no SaaS-side field mapping.
+#
+# DRAFT — two gates before this is locked:
+#   1. CONSUMER VALIDATION: confirm every field below is actually read by a ClearVue
+#      feature/UI. Drop anything no consumer uses (no gold-plating).
+#   2. 11.6 FEASIBILITY: confirm every shape here is producible by an OpenEdge 11.6 /
+#      PASOE connector within the latency budget. See docs/feasibility-11.6.md.
+#      In particular, the nested cover-sheet envelope must serialize cleanly from a
+#      ProDataset (the legacy adaptor faked it with fragile string-munging — the 11.6
+#      design must do it natively or the shape changes).
+#
+# Legacy reference (as-built shapes + the working MFG/PRO query joins) lives in the
+# ClearVueSaaS repo and the Interact ClearVueAdaptor — used for query logic, not shape.
+#
+# Design decisions baked in (differ deliberately from the legacy adaptor):
+#   - Field names are ClearVue-canonical (PartNumber, OperationNumber, UnitOfMeasure…)
+#     so stock output == SaaS model == identity.
+#   - Domain is CONNECTOR CONFIGURATION, not a request param (one connector instance
+#     serves one ERP domain). Legacy hardcoded "MPI"; here it's configured, not passed.
+#   - Auth is an ENFORCED header (legacy used an unenforced query param).
+#   - `Reference` (the legacy cover-sheet "Refinance" typo is fixed).
+#   - Structured ERROR model (code + category + retryable + correlationId + safe diagnostic)
+#     so ClearVue can auto-retry transient ERP-DB drops and support can assist the client.
+#   - The connector AUTO-RECONNECTS on client/server DB drops (the MFG/PRO DB is restarted
+#     often); a structured error is returned only when reconnect fails within budget.
+#     See docs/resilience-and-errors.md.
+
+openapi: 3.0.3
+
+info:
+  title: ClearVue ERP Connector Interface
+  version: 1.0.0-draft
+  description: >
+    Live, read-only, single-record ERP lookups consumed by ClearVue SaaS and served
+    by an on-prem connector (first implementation: OpenEdge 11.6 / PASOE against QAD
+    MFG/PRO). Synchronous GETs; no write-back. Canonical field names — the connector
+    emits exactly what ClearVue's models expect.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: SolvePoint Solutions — ClearVue
+
+servers:
+  - url: http://{host}:{port}/{basePath}
+    description: On-prem connector base URL (configured in the ClearVue ConnectorAgent)
+    variables:
+      host: { default: connector-host }
+      port: { default: "8820" }
+      basePath: { default: clearvue/erp/v1 }
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: health
+  - name: lookups
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: health
+      summary: Liveness / readiness
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+              example: { service: "clearvue-openedge-connector", version: "1.0.0", erpReachable: true }
+
+  /product-structure:
+    get:
+      tags: [lookups]
+      operationId: getProductStructure
+      summary: Product structure (BOM) for a part at a site
+      parameters:
+        - $ref: "#/components/parameters/Part"
+        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Structure rows (empty array if the part has no components)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StructureComponent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/ErpError" }
+        "503": { $ref: "#/components/responses/ErpUnavailable" }
+        "504": { $ref: "#/components/responses/ErpTimeout" }
+
+  /product-route:
+    get:
+      tags: [lookups]
+      operationId: getProductRoute
+      summary: Routing for a part at a site
+      parameters:
+        - $ref: "#/components/parameters/Part"
+        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Routing rows (empty array if none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RouteStep" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/ErpError" }
+        "503": { $ref: "#/components/responses/ErpUnavailable" }
+        "504": { $ref: "#/components/responses/ErpTimeout" }
+
+  /product-cover-sheet:
+    get:
+      tags: [lookups]
+      operationId: getProductCoverSheet
+      summary: Combined cover sheet (header + structure + route + comments)
+      description: >
+        The richest operation and the feasibility bellwether — prove this one
+        end-to-end on 11.6 first. The cover-sheet route rows carry two extra fields
+        (PiecesPerHour, WorkCenterDescription) that the standalone route omits.
+      parameters:
+        - $ref: "#/components/parameters/Part"
+        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Cover sheet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CoverSheet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/ErpError" }
+        "503": { $ref: "#/components/responses/ErpUnavailable" }
+        "504": { $ref: "#/components/responses/ErpTimeout" }
+
+  # /part — DEFERRED decision (SOL-53). The cover sheet already returns part header
+  # fields; add a standalone part lookup only if a consumer needs it. Not in v1 draft.
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Enforced shared secret / token in the Authorization header. (The legacy
+        adaptor used an unenforced query-string key — not carried forward.)
+
+  parameters:
+    Part:
+      name: part
+      in: query
+      required: true
+      description: ERP part number.
+      schema: { type: string, maxLength: 50 }
+    Site:
+      name: site
+      in: query
+      required: true
+      description: ERP site / plant number.
+      schema: { type: string, maxLength: 20 }
+    CorrelationId:
+      name: correlationId
+      in: query
+      required: false
+      description: >
+        Optional caller-supplied correlation id. The connector echoes it in the Error body
+        (and SHOULD log it) so ClearVue and connector logs can be matched for support.
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Missing/invalid parameter (400)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { code: BAD_REQUEST, category: REQUEST, retryable: false, message: "part is required" }
+    Unauthorized:
+      description: Missing/invalid credentials (401)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { code: UNAUTHORIZED, category: AUTH, retryable: false }
+    NotFound:
+      description: No matching record for the part/site (404)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { code: NOT_FOUND, category: DATA, retryable: false }
+    ErpUnavailable:
+      description: >
+        ERP database unreachable — transient (503, retryable). `code` is `ERP_DISCONNECTED`
+        when an existing client/server connection dropped (e.g. DB restart) and reconnect did
+        not succeed in budget, or `ERP_UNAVAILABLE` when the DB host/broker cannot be reached
+        at all. ClearVue treats both identically (category ERP_CONNECTIVITY, retryable). The
+        connector auto-reconnects on DB-restart drops; this is returned only when reconnection
+        did not succeed in time.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            code: ERP_DISCONNECTED
+            category: ERP_CONNECTIVITY
+            retryable: true
+            retryAfterSeconds: 5
+            message: "ERP database is restarting; retry shortly."
+            diagnostic: "client/server connection to qaddb dropped; reconnect attempted 3x"
+    ErpTimeout:
+      description: Query exceeded the connector's time budget (504, retryable)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { code: ERP_TIMEOUT, category: ERP_CONNECTIVITY, retryable: true, retryAfterSeconds: 3 }
+    ErpError:
+      description: ERP query failed for a non-connectivity reason (502)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { code: ERP_QUERY_ERROR, category: INTERNAL, retryable: false }
+
+  schemas:
+    Health:
+      type: object
+      required: [service]
+      properties:
+        service:     { type: string }
+        version:     { type: string }
+        erpReachable: { type: boolean, description: "Optional: did a lightweight DB probe succeed?" }
+
+    Error:
+      type: object
+      required: [code, category, retryable]
+      properties:
+        code:
+          type: string
+          description: Stable machine code.
+          enum: [BAD_REQUEST, UNAUTHORIZED, NOT_FOUND, ERP_DISCONNECTED, ERP_UNAVAILABLE, ERP_TIMEOUT, ERP_QUERY_ERROR, INTERNAL]
+        category:
+          type: string
+          description: Coarse class that routes ClearVue handling and support assistance.
+          enum: [REQUEST, AUTH, DATA, ERP_CONNECTIVITY, INTERNAL]
+        message:
+          type: string
+          description: Human-readable, sanitized — never credentials, PII, or raw ERP internals.
+        retryable:
+          type: boolean
+          description: >
+            True when the caller may retry — transient conditions, chiefly the ERP DB
+            restarting / reconnecting. ClearVue may auto-retry these so a DB bounce is
+            invisible to the user.
+        retryAfterSeconds:
+          type: integer
+          nullable: true
+          description: Hint for how long to wait before retrying a retryable error.
+        correlationId:
+          type: string
+          description: Echoes the request correlation id so SaaS and connector logs match for support.
+        timestamp:
+          type: string
+          format: date-time
+        diagnostic:
+          type: string
+          nullable: true
+          description: >
+            Optional SAFE operator-facing hint to guide assistance — e.g. "client/server
+            connection to qaddb dropped; reconnect attempted 3x". Sanitized; never secrets/PII.
+
+    # Canonical = ClearVue SaaS model property names → stock output is identity.
+    StructureComponent:
+      type: object
+      required: [PartNumber]
+      properties:
+        Level:          { type: string }
+        PartNumber:     { type: string }
+        Reference:      { type: string, description: "Reference designator (legacy 'Refinance' typo fixed)." }
+        AltPartNumber:  { type: string }
+        Revision:       { type: string }
+        Description:    { type: string }
+        Quantity:       { type: number, format: double }
+        UnitOfMeasure:  { type: string }
+
+    RouteStep:
+      type: object
+      required: [OperationNumber]
+      properties:
+        OperationNumber:   { type: string }
+        StandardOperation: { type: string }
+        Description:       { type: string }
+        WorkCenterId:      { type: string }
+        Machine:           { type: string }
+        StartDate:         { type: string, format: date, nullable: true }
+        EndDate:           { type: string, format: date, nullable: true }
+        SetupHours:        { type: number, format: double }
+        RunHoursPerPiece:  { type: number, format: double }
+        Wait:              { type: number, format: double }
+        Move:              { type: number, format: double }
+        YieldPercent:      { type: number, format: double }
+        Tool:              { type: string }
+        # Cover-sheet route only (null/omitted on standalone /product-route):
+        PiecesPerHour:         { type: number, format: double, nullable: true }
+        WorkCenterDescription: { type: string, nullable: true }
+
+    CoverSheetHeader:
+      type: object
+      properties:
+        ShipTo:         { type: string }
+        ShipName:       { type: string }
+        PartNumber:     { type: string }
+        AltPartNumber:  { type: string }
+        Revision:       { type: string }
+        Description:    { type: string }
+        Bom:            { type: string }
+        CustItem:       { type: string }
+        RouteCode:      { type: string }
+        QtyPallet:      { type: string }
+        Note1:  { type: string, nullable: true }
+        Note2:  { type: string, nullable: true }
+        Note3:  { type: string, nullable: true }
+        Note4:  { type: string, nullable: true }
+        Note5:  { type: string, nullable: true }
+        Note6:  { type: string, nullable: true }
+        Note7:  { type: string, nullable: true }
+        Note8:  { type: string, nullable: true }
+        Note9:  { type: string, nullable: true }
+        Note10: { type: string, nullable: true }
+
+    CoverSheet:
+      type: object
+      required: [PartNumber]
+      properties:
+        PartNumber: { type: string }
+        Header:     { $ref: "#/components/schemas/CoverSheetHeader" }
+        Structure:
+          type: array
+          items: { $ref: "#/components/schemas/StructureComponent" }
+        Route:
+          type: array
+          items: { $ref: "#/components/schemas/RouteStep" }
+        Comments:
+          type: array
+          items: { type: string }

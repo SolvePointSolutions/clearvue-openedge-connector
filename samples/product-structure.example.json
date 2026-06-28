@@ -1,0 +1,42 @@
+[
+  {
+    "Level": "Parent",
+    "PartNumber": "PUMP-ASSY-100",
+    "Reference": null,
+    "AltPartNumber": "DRW-100-A",
+    "Revision": "B",
+    "Description": "Centrifugal Pump Assembly",
+    "Quantity": 0,
+    "UnitOfMeasure": "EA"
+  },
+  {
+    "Level": "1",
+    "PartNumber": "HOUSING-100",
+    "Reference": "010",
+    "AltPartNumber": "DRW-100-H",
+    "Revision": "A",
+    "Description": "Pump Housing, Cast",
+    "Quantity": 1,
+    "UnitOfMeasure": "EA"
+  },
+  {
+    "Level": "1",
+    "PartNumber": "IMPELLER-50",
+    "Reference": "020",
+    "AltPartNumber": null,
+    "Revision": "C",
+    "Description": "Impeller, 50mm",
+    "Quantity": 1,
+    "UnitOfMeasure": "EA"
+  },
+  {
+    "Level": ".2",
+    "PartNumber": "GASKET-KIT",
+    "Reference": "030",
+    "AltPartNumber": null,
+    "Revision": null,
+    "Description": "Item not in inventory",
+    "Quantity": 2.5,
+    "UnitOfMeasure": null
+  }
+]
