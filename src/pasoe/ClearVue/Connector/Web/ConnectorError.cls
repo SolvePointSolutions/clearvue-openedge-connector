@@ -6,11 +6,12 @@
     Mirrors the OpenAPI `Error` schema EXACTLY (code, category, retryable,
     message, retryAfterSeconds, correlationId, timestamp, diagnostic). It is
     also a Progress.Lang.AppError subclass so query/data code can THROW it and
-    a WebHandler can CATCH it and render the contract body with the right HTTP
-    status -- one path for every failure mode.
+    the REST-adapter .p entry seam can CATCH it and render the contract body with
+    the right HTTP status (ToJsonString + StatusString) -- one path for every
+    failure mode.
 
     The code<->category<->retryable<->httpStatus mapping lives here so it can
-    never drift between handlers. Construct via the static factories.
+    never drift between entry points. Construct via the static factories.
 
     One responsibility: represent + render a contract error. No DB, no auth.
   ----------------------------------------------------------------------*/
@@ -134,6 +135,20 @@ CLASS ClearVue.Connector.Web.ConnectorError INHERITS Progress.Lang.AppError:
             oJson:Add("diagnostic":U, THIS-OBJECT:Diagnostic).
 
         RETURN oJson.
+    END METHOD.
+
+    /* Convenience for the classic-REST-adapter .p entry seam: render the
+       contract Error body straight to LONGCHAR for the OUTPUT param. */
+    METHOD PUBLIC LONGCHAR ToJsonString():
+        DEFINE VARIABLE lcBody AS LONGCHAR NO-UNDO.
+        THIS-OBJECT:ToJson():Write(OUTPUT lcBody).
+        RETURN lcBody.
+    END METHOD.
+
+    /* The HTTP status as the CHARACTER code the REST adapter expects from
+       RETURN (useReturnValue="true"), e.g. "404", "503". */
+    METHOD PUBLIC CHARACTER StatusString():
+        RETURN STRING(THIS-OBJECT:HttpStatus).
     END METHOD.
 
 END CLASS.

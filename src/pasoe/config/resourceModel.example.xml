@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  REST resource mapping for the CLASSIC OpenEdge REST adapter (11.6 target).
+  EXAMPLE / TEMPLATE -- this is the artifact that maps each contract URI + verb
+  to a mapped procedure (the .p entry seam) and its INPUT/OUTPUT params. In a
+  PDSOE REST project this model is generated/edited via the REST resource editor
+  and packaged into a .paar deployed under
+  PASOEContent/WEB-INF/adapters/rest/<service>/. Hand-shown here so the binding
+  is explicit and reviewable.
+
+  Param `type` values used:
+    QUERY   -> query-string parameter         (part, site, correlationId)
+    HEADER  -> inbound HTTP request header     (Authorization)  <-- key point:
+              the classic REST adapter CAN surface a request header to a
+              CHARACTER input param; PASOE Web handlers cannot read Authorization.
+
+  HTTP status: each .p is annotated useReturnValue="true", so the procedure's
+  RETURN value (a CHARACTER status code) maps to the HTTP response status line.
+
+  Base path comes from the REST service context root; combined with the server
+  web-app context this yields the contract base http://<host>:<port>/clearvue/erp/v1.
+-->
+<prgs:model xmlns:prgs="http://www.progress.com/caf/camel/component/prgrs" id="resourceModel">
+
+  <!-- GET /health  (contract security: [] -- no auth) -->
+  <prgs:resource consumes="application/json" name="_health" path="/health" produces="application/json">
+    <prgs:operation name="GetHealth" verb="GET"
+                    consumes="application/json" produces="application/json"
+                    idls="ClearVue/Connector/Rest/GetHealth.pidl::com.progress.openedge.pdt.bpmbindings"/>
+  </prgs:resource>
+
+  <!-- GET /product-structure?part=&site=&correlationId=  (+ Authorization header) -->
+  <prgs:resource consumes="application/json" name="_productstructure" path="/product-structure" produces="application/json">
+    <prgs:operation name="GetProductStructure" verb="GET"
+                    consumes="application/json" produces="application/json"
+                    idls="ClearVue/Connector/Rest/GetProductStructure.pidl::com.progress.openedge.pdt.bpmbindings">
+      <prgs:param name="part"          type="QUERY"/>
+      <prgs:param name="site"          type="QUERY"/>
+      <prgs:param name="correlationId" type="QUERY"/>
+      <!-- map the inbound Authorization header to the .p's `authorization` param -->
+      <prgs:param name="authorization" type="HEADER" headerName="Authorization"/>
+    </prgs:operation>
+  </prgs:resource>
+
+  <!-- /product-route, /product-cover-sheet added when those endpoints are built. -->
+</prgs:model>

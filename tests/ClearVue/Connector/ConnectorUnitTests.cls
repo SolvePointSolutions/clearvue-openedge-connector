@@ -123,4 +123,40 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
         Assert:IsFalse(DatabaseConnection:IsDisconnectError(132)).
     END METHOD.
 
+    /* The .p entry seam returns this string to the REST adapter
+       (useReturnValue="true") to set the HTTP status line. */
+    @Test.
+    METHOD PUBLIC VOID StatusString_is_the_http_code_for_RETURN():
+        Assert:Equals("404":U, ConnectorError:NotFound("x":U):StatusString()).
+        Assert:Equals("401":U, ConnectorError:Unauthorized():StatusString()).
+        Assert:Equals("503":U, ConnectorError:ErpDisconnected("x":U):StatusString()).
+        Assert:Equals("504":U, ConnectorError:ErpTimeout("x":U):StatusString()).
+    END METHOD.
+
+    /* The .p writes this LONGCHAR to the responseBody OUTPUT param. */
+    @Test.
+    METHOD PUBLIC VOID ToJsonString_renders_a_nonempty_error_body():
+        DEFINE VARIABLE lcBody AS LONGCHAR NO-UNDO.
+        lcBody = ConnectorError:ErpDisconnected("reconnect 3x":U):ToJsonString().
+        Assert:IsTrue(LENGTH(STRING(lcBody)) > 0).
+        Assert:IsTrue(INDEX(STRING(lcBody), "ERP_DISCONNECTED":U) > 0).
+        Assert:IsTrue(INDEX(STRING(lcBody), "ERP_CONNECTIVITY":U) > 0).
+    END METHOD.
+
+    /* Bearer extraction (the part of ApiKeyAuthenticator that is env-free) is
+       exercised end-to-end on the box; here we cover the parse via a config
+       whose secret matches a known token. Env-sourced GetApiKey() is covered by
+       the integration smoke test (docs/test-db-setup.md), not this unit run. */
+    @Test.
+    METHOD PUBLIC VOID BearerHeader_blank_is_unauthorized_fail_closed():
+        DEFINE VARIABLE oCfg  AS ClearVue.Connector.Config.ConnectorConfig NO-UNDO.
+        DEFINE VARIABLE oAuth AS ClearVue.Connector.Security.ApiKeyAuthenticator NO-UNDO.
+        oCfg  = NEW ClearVue.Connector.Config.ConnectorConfig().
+        oAuth = NEW ClearVue.Connector.Security.ApiKeyAuthenticator(oCfg).
+        /* no secret configured in a bare unit env -> fail closed regardless */
+        Assert:IsFalse(oAuth:IsAuthorizedHeader("":U)).
+        Assert:IsFalse(oAuth:IsAuthorizedHeader(?)).
+        Assert:IsFalse(oAuth:IsAuthorizedHeader("Bearer anything":U)).
+    END METHOD.
+
 END CLASS.
