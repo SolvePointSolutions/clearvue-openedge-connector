@@ -9,9 +9,14 @@
 # .gitignore'd as *.pf.local). No QAD schema (*.df) is shipped here.
 # --------------------------------------------------------------------------
 
--db   mfgprod          # physical DB name
--ld   qaddb            # logical name the connector CONNECTED()/queries by
--S    <broker-port>    # e.g. 50000
--H    <db-host>        # e.g. db.internal.example.com  (NEVER a real host in git)
+# Physical DB name, logical name, host and port are all configurable here.
+# The connector references the logical name `qaddb` (CONNECTED("qaddb") and the
+# default CLEARVUE_DB_LOGICAL_NAME), so -ld MUST resolve to qaddb regardless of
+# the physical DB name -- keep -ld qaddb when pointing at a renamed/synthetic DB.
+-db   mfgprod          # physical DB name (prod). For the synthetic test DB use
+                       #   -db clearvue-test  but KEEP  -ld qaddb  (see docs/test-db-setup.md)
+-ld   qaddb            # logical name the connector CONNECTED()/queries by (default qaddb)
+-S    <broker-port>    # e.g. 50000   (configurable)
+-H    <db-host>        # e.g. db.internal.example.com  (configurable; NEVER a real host in git)
 -RO                    # read-only client/server connection (defense in depth)
 -T    /tmp/clearvue    # temp dir

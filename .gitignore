@@ -3,6 +3,12 @@
 *.df
 mfgprod.df
 *.dictionary
+# Progress DB schema-def / storage-area / data-dump artifacts (synthetic test DB too).
+*.st
+*.d
+# Local test-database fixtures (synthetic .st/.df/.d, loaded DB, raw expected output).
+# The runbook docs/test-db-setup.md is committed; the fixtures themselves are NOT.
+test/fixtures/
 # Captured ERP responses may contain customer data — keep samples local unless scrubbed.
 samples/**/*.json
 !samples/**/*.example.json

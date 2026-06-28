@@ -122,12 +122,25 @@ Budget (resilience-and-errors.md): connector total ≤ **7s**, target **5–7s**
 case, with the cover sheet as the heavier follow-on. **RECORD MEASURED TIMES HERE:**
 `__TBD on spike__` (note part depth + row count per sample).
 
+> **Minimal-synthetic-DB caveat.** A timing against the synthetic test DB
+> (`docs/test-db-setup.md`) is a **smoke-test floor only — NOT a production
+> measurement.** Three rows in one local storage area do not represent MPI's v10
+> schema, data volume, indexes, or network. The real latency figure must come
+> from the production MFG/PRO schema; the synthetic number proves only that the
+> code path executes within a sane bound.
+
+A no-MFG/PRO option to run the skeleton end-to-end today: build the synthetic
+test DB per `docs/test-db-setup.md`, connect it as `-ld qaddb`, and diff the
+`/product-structure?part=PUMP-ASSY-100&site=1000` response against
+`samples/product-structure.example.json`.
+
 ## 8. What still needs the live box
 
 | Item | Status | Needs |
 |---|---|---|
-| Clean compile vs schema + OE 11.6 | not done here | compile on the box |
+| Clean compile vs schema + OE 11.6 | not done here | compile on the box (or the synthetic DB, docs/test-db-setup.md) |
+| End-to-end run vs a DB | runnable on the synthetic DB | build fixtures + diff expected JSON |
 | Auto-reconnect on broker restart | code in place; **unverified** | §6 + pin error code |
 | Disconnect error-code precision | documented family; **not observed** | §6 capture |
-| Latency vs real MPI schema | **not measured** | §7 |
+| Latency vs **real** MPI schema | **not measured** (synthetic = floor only) | §7 |
 | Read-only grants confirmed | feasibility TODO | MPI to provision |
