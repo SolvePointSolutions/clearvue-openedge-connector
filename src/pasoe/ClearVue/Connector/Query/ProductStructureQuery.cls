@@ -85,7 +85,9 @@ CLASS ClearVue.Connector.Query.ProductStructureQuery:
     END METHOD.
 
     /* Run the explosion. Empties + repopulates ttProductStructure. Returns the
-       row count (0 => no structure; the handler maps that to 404 per contract).
+       row count: 0 => the part does NOT exist in pt_mstr (caller -> 404); >=1 =>
+       the part exists and the array carries at least the root row (a part with
+       no BOM returns exactly 1 -- just the root -- and the caller returns 200).
        THROWs ConnectorError on connectivity/query failure. */
     METHOD PUBLIC INTEGER Execute(INPUT pcPart AS CHARACTER,
                                   INPUT pcSite AS CHARACTER):
@@ -125,7 +127,16 @@ CLASS ClearVue.Connector.Query.ProductStructureQuery:
         END CATCH.
     END METHOD.
 
-    /* Resolve the BOM key + emit the parent header row, then explode. */
+    /* Resolve the BOM key + emit the root row, then explode.
+
+       EXISTENCE GATE (SOL-58, Rod's ruling): the "does the part exist?" test is a
+       REAL pt_mstr lookup -- NOT "did the explosion return rows." This is what
+       distinguishes the two cases the contract now separates:
+         - part NOT in pt_mstr        -> emit NOTHING -> 0 rows -> caller 404s.
+         - part IN pt_mstr (any BOM)  -> ALWAYS emit the root row (even childless),
+                                         then add children if any -> 200.
+       So a real purchased/raw part with no components returns 200 with just the
+       root row, instead of the old false-404. */
     METHOD PRIVATE VOID BuildStructure(INPUT pcPart AS CHARACTER):
         DEFINE VARIABLE cBomKey AS CHARACTER NO-UNDO.
         DEFINE BUFFER bPt  FOR pt_mstr.
@@ -133,12 +144,16 @@ CLASS ClearVue.Connector.Query.ProductStructureQuery:
 
         cBomKey = pcPart.
 
-        /* part header / BOM-code substitution (legacy: pt_bom_code) */
+        /* THE existence check: part master lookup. Absent => not found (404). */
         FIND FIRST bPt NO-LOCK
             WHERE bPt.pt_domain = cDomain
               AND bPt.pt_part   = pcPart NO-ERROR.
 
-        IF AVAILABLE bPt AND bPt.pt_bom_code <> "":U THEN
+        IF NOT AVAILABLE bPt THEN
+            RETURN.   /* part not in pt_mstr -> no rows -> caller returns 404 */
+
+        /* part header / BOM-code substitution (legacy: pt_bom_code) */
+        IF bPt.pt_bom_code <> "":U THEN
             cBomKey = bPt.pt_bom_code.
 
         /* site-specific BOM-code override (legacy: ptp_det.ptp_bom_code) */
@@ -150,18 +165,16 @@ CLASS ClearVue.Connector.Query.ProductStructureQuery:
         IF AVAILABLE bPtp AND bPtp.ptp_bom_code <> "":U THEN
             cBomKey = bPtp.ptp_bom_code.
 
-        /* parent header row -- only when the part actually has components */
-        IF CAN-FIND(FIRST ps_mstr NO-LOCK
-                    WHERE ps_mstr.ps_domain = cDomain
-                      AND ps_mstr.ps_par    = cBomKey) THEN
-            EmitParentRow(INPUT pcPart, INPUT cBomKey).
+        /* part exists -> ALWAYS emit the root row (even if it has no components) */
+        EmitParentRow(INPUT pcPart, INPUT cBomKey).
 
-        /* recursive explosion from level 1 */
+        /* recursive explosion from level 1 (no-op when the part has no BOM) */
         ExplodeLevel(INPUT cBomKey, INPUT 1).
         RETURN.
     END METHOD.
 
-    /* Emit the "Parent" header row for the requested part. */
+    /* Emit the "Parent" (root) row for the requested part. Only called when the
+       part exists in pt_mstr (see BuildStructure existence gate). */
     METHOD PRIVATE VOID EmitParentRow(INPUT pcPart   AS CHARACTER,
                                       INPUT pcBomKey  AS CHARACTER):
         DEFINE BUFFER bPt  FOR pt_mstr.
@@ -173,7 +186,9 @@ CLASS ClearVue.Connector.Query.ProductStructureQuery:
             ttProductStructure.SeqNo      = iSeq
             ttProductStructure.Level      = "Parent":U
             ttProductStructure.PartNumber = pcPart
-            ttProductStructure.Quantity   = 0.
+            /* root has no qty-per-parent; 1 by convention (SOL-58, Rod) so a
+               consumer doing arithmetic on Quantity stays safe. Non-nullable. */
+            ttProductStructure.Quantity   = 1.
 
         FIND FIRST bPt NO-LOCK
             WHERE bPt.pt_domain = cDomain AND bPt.pt_part = pcPart NO-ERROR.

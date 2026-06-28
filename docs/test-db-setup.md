@@ -74,28 +74,54 @@ pro -db clearvue-test -ld qaddb -1 -p ClearVue/Connector/Rest/GetProductStructur
 #  part=PUMP-ASSY-100 site=1000 and "Bearer <key>" as the authorization param.)
 ```
 
-## Expected output (deterministic — diff target)
+## Expected output (deterministic — diff targets)
 
-`GET /product-structure?part=PUMP-ASSY-100&site=1000` against this fixture must
-return exactly [`samples/product-structure.example.json`](../samples/product-structure.example.json):
+Three deterministic cases prove the SOL-58 root-row / 404 semantics:
 
-- Parent row `PUMP-ASSY-100` (Level `Parent`, Qty 0).
+### Case 1 — part with a multi-level BOM (200, root + children)
+
+`GET /product-structure?part=PUMP-ASSY-100&site=1000` must return exactly
+[`samples/product-structure.example.json`](../samples/product-structure.example.json):
+
+- Root row `PUMP-ASSY-100` (Level `Parent`, **Qty 1** — root convention).
 - `HOUSING-100` and `IMPELLER-50` at Level `1` (first explosion level).
 - `GASKET-KIT` at Level `.2` (under IMPELLER-50), `Description` "Item not in
   inventory" and `UnitOfMeasure` **null** (intentionally absent from `pt_mstr`,
   proving the not-in-inventory branch).
+
+### Case 2 — part that EXISTS but has no BOM (200, root row ONLY)
+
+`GET /product-structure?part=HOUSING-100&site=1000` must return exactly
+[`samples/product-structure-no-bom.example.json`](../samples/product-structure-no-bom.example.json):
+a single root row for `HOUSING-100` (Level `Parent`, Qty 1). `HOUSING-100` is in
+`pt_mstr` but is no parent in `ps_mstr`, so it exists with no components — this is
+**200 with just the root row, NOT a 404**.
+
+### Case 3 — part that does NOT exist (404)
+
+`GET /product-structure?part=NOPE-999&site=1000` must return **404** with the
+contract `Error` body (`code: NOT_FOUND`). `NOPE-999` is absent from `pt_mstr`, so
+the existence gate yields 0 rows → 404. This is the ONLY 404 path.
+
+> **Existence gate:** 404-vs-200-empty is decided by a real `pt_mstr` lookup, not
+> by "did the explosion return rows" — so a real purchased/raw part (Case 2) is
+> never falsely reported as not-found.
 
 > **Level label note (faithful to the ported legacy logic):** the first
 > explosion level is labelled `1`, the second `.2`, the third `..3`, etc.
 > (`BuildLevelLabel`). This is the legacy `xx-bmpsrp.p` indentation convention,
 > re-implemented; it is intentional, not an off-by-one.
 
-Diff the live response against the committed sample to confirm no regression:
+Diff the live responses against the committed samples to confirm no regression:
 
 ```sh
 curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
   "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=PUMP-ASSY-100&site=1000" \
-  | diff - ../../samples/product-structure.example.json   # path from test/fixtures
+  | diff - ../../samples/product-structure.example.json          # Case 1 (from test/fixtures)
+
+curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
+  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=HOUSING-100&site=1000" \
+  | diff - ../../samples/product-structure-no-bom.example.json   # Case 2
 ```
 
 ## Latency caveat (important)

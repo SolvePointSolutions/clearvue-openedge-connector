@@ -105,9 +105,15 @@ curl -s http://<host>:<port>/<webapp>/clearvue/erp/v1/health
 # product-structure (bearer required)
 curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
   "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=PUMP-ASSY-100&site=1000"
-# -> StructureComponent[]  (see samples/product-structure.example.json)
+# -> StructureComponent[] root row (Quantity 1) + children  (samples/product-structure.example.json)
 
-# 401 (no/blank bearer), 400 (missing part), 404 (unknown part) are the other paths.
+# A part that EXISTS but has no BOM -> 200 with ONLY the root row (NOT 404):
+curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
+  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=HOUSING-100&site=1000"
+# -> single root row  (samples/product-structure-no-bom.example.json)
+
+# 401 (no/blank bearer), 400 (missing part), 404 ONLY when the part is absent
+# from pt_mstr (genuinely not in the ERP) are the other paths.
 ```
 
 ## 6. [LIVE-ONLY] Prove auto-reconnect

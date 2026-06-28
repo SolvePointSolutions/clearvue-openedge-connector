@@ -81,18 +81,42 @@ paths:
       tags: [lookups]
       operationId: getProductStructure
       summary: Product structure (BOM) for a part at a site
+      description: >
+        Returns the requested part as a root ("Parent") row followed by its
+        exploded BOM components. The root row is ALWAYS present when the part
+        exists in the ERP (pt_mstr). A part that exists but has no BOM (e.g. a
+        purchased or raw part) returns 200 with ONLY the root row — this is a
+        valid result, not a 404. 404 is reserved strictly for a part that does
+        not exist in the ERP. The root row's Quantity is 1 by convention (the
+        root has no quantity-per-parent; 1 keeps column arithmetic safe).
       parameters:
         - $ref: "#/components/parameters/Part"
         - $ref: "#/components/parameters/Site"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
         "200":
-          description: Structure rows (empty array if the part has no components)
+          description: >
+            The part exists. The array always contains the root ("Parent") row,
+            followed by any exploded BOM components. For a part with no BOM the
+            array contains only that single root row (it is never an empty array
+            and never a 404).
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/StructureComponent" }
+              examples:
+                withComponents:
+                  summary: Multi-level BOM (root + exploded children)
+                  value:
+                    - { Level: Parent, PartNumber: PUMP-ASSY-100, Reference: null, AltPartNumber: DRW-100-A, Revision: B, Description: "Centrifugal Pump Assembly", Quantity: 1, UnitOfMeasure: EA }
+                    - { Level: "1", PartNumber: HOUSING-100, Reference: "010", AltPartNumber: DRW-100-H, Revision: A, Description: "Pump Housing, Cast", Quantity: 1, UnitOfMeasure: EA }
+                    - { Level: "1", PartNumber: IMPELLER-50, Reference: "020", AltPartNumber: null, Revision: C, Description: "Impeller, 50mm", Quantity: 1, UnitOfMeasure: EA }
+                    - { Level: ".2", PartNumber: GASKET-KIT, Reference: "030", AltPartNumber: null, Revision: null, Description: "Item not in inventory", Quantity: 2.5, UnitOfMeasure: null }
+                rootOnlyNoBom:
+                  summary: Part exists but has no BOM (root row only — still 200)
+                  value:
+                    - { Level: Parent, PartNumber: HOUSING-100, Reference: null, AltPartNumber: DRW-100-H, Revision: A, Description: "Pump Housing, Cast", Quantity: 1, UnitOfMeasure: EA }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -198,11 +222,14 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
           example: { code: UNAUTHORIZED, category: AUTH, retryable: false }
     NotFound:
-      description: No matching record for the part/site (404)
+      description: >
+        The part does not exist in the ERP (404). For /product-structure this
+        means the part is absent from pt_mstr. NOTE: a part that exists but has
+        no BOM is NOT a 404 — it returns 200 with only the root row.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
-          example: { code: NOT_FOUND, category: DATA, retryable: false }
+          example: { code: NOT_FOUND, category: DATA, retryable: false, message: "part PUMP-XYZ not found in ERP for site 1000" }
     ErpUnavailable:
       description: >
         ERP database unreachable — transient (503, retryable). `code` is `ERP_DISCONNECTED`
@@ -285,14 +312,23 @@ components:
     StructureComponent:
       type: object
       required: [PartNumber]
+      description: >
+        One row of a product structure. The first row is the root ("Parent")
+        row for the requested part; subsequent rows are its exploded components.
       properties:
-        Level:          { type: string }
+        Level:          { type: string, description: "Indent level; 'Parent' for the root row, then '1', '.2', '..3' … for explosion depth." }
         PartNumber:     { type: string }
         Reference:      { type: string, description: "Reference designator (legacy 'Refinance' typo fixed)." }
         AltPartNumber:  { type: string }
         Revision:       { type: string }
         Description:    { type: string }
-        Quantity:       { type: number, format: double }
+        Quantity:
+          type: number
+          format: double
+          description: >
+            Quantity-per-parent for a component row. For the root ("Parent") row
+            this is 1 by convention (the root has no quantity-per-parent; 1 keeps
+            arithmetic over the column safe). Non-nullable.
         UnitOfMeasure:  { type: string }
 
     RouteStep:
