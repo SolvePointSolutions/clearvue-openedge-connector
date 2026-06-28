@@ -10,6 +10,39 @@ so the 11.6 constraint is an active design input, not an afterthought.
 > latency, the exact OE connection-failure error code on broker restart, and MPI's read-only
 > grants / OE-11.6-platform confirmation.
 
+> ### ⚠ BINDING-MODEL CORRECTION (2026-06-28, Rod — authoritative for the target env)
+>
+> **Conflict found.** This doc originally LOCKED the REST handler style as an
+> `OpenEdge.Web.WebHandler` subclass (§1, and the error-semantics resolution in §0 Q2). That
+> conflicts with the live 11.6 target: *"In version 11.6 you can't hook up classes directly to
+> a REST resource URI. You have to put the class in a .p and map input/output variables or
+> datasets."*
+>
+> **Resolution — binding model changed: `WebHandler` → CLASSIC OpenEdge REST adapter (.p).**
+> The REST resource URI maps to an **annotated `.p`** (`@openapi.openedge.export FILE(type="REST"
+> …)`) whose INPUT/OUTPUT params are mapped to query-string params, request headers, and a
+> LONGCHAR body (see `config/resourceModel.example.xml`, packaged into a `.paar`). This is the
+> same transport the legacy adaptor used (`resourceModel.xml` → `.pidl` controllers).
+>
+> **What does NOT change:** the OOABL logic classes (`ProductStructureQuery`,
+> `DatabaseConnection.EnsureConnected()`, `ApiKeyAuthenticator`, `JsonFormat`,
+> `ProductStructureJsonComposer`, `ConnectorError`) are unchanged — the `.p` is a thin seam that
+> calls them. JSON is still **hand-composed** via the JSON Object Model (not `WRITE-JSON` of a
+> dataset). The contract shapes/field names are unchanged.
+>
+> **How the three WebHandler conveniences are met in the .p model:**
+> - **HTTP status codes** — `useReturnValue="true"` maps the procedure's `RETURN "<code>"`
+>   (CHARACTER) to the HTTP status line, so real 200/400/401/404/502/503/504 are set from the
+>   `.p`. (The legacy used `useReturnValue="false"` and crammed status into a body param — fixed.)
+> - **`Authorization: Bearer` header** — surfaced to the `.p` as a CHARACTER input param via a
+>   `type="HEADER"` mapping (the classic REST adapter CAN read request headers; PASOE Web
+>   handlers cannot read `Authorization`). `ApiKeyAuthenticator:IsAuthorizedHeader()` validates it.
+> - **503 `ERP_DISCONNECTED` body** — `ConnectorError:ToJsonString()` → LONGCHAR OUTPUT param,
+>   `RETURN "503"`. Maps cleanly.
+>
+> See `docs/deploy-and-run-11.6.md` for the revised deploy steps. §1/§0 below are annotated to
+> reflect this correction.
+
 ## 0. Already answered (from Squirrel's lane + the as-built adaptor — don't re-spike)
 
 Squirrel's Progress-REST work (`ClearVueSaaS/docs/modules/Integrations/progress-rest-live-lookup-design.md` §5/§8, the committed `Part + CoverSheet` implementation `c24ca69`) plus our read of the source-of-truth adaptor (`Interact/ClearVueAdaptor/AppServer`) already settle most cover-sheet questions:
@@ -23,7 +56,7 @@ Squirrel's Progress-REST work (`ClearVueSaaS/docs/modules/Integrations/progress-
 ### Spike questions — mostly resolved by the §1–§4 decisions
 
 1. **Clean serialization** — ✅ **RESOLVED by design.** Build the envelope with the ABL **JSON Object Model** (`JsonObject`/`JsonArray`), hand-composed — not `WRITE-JSON` of a dataset. Full control over nesting/names/types/nulls, so the contract envelope (incl. `Comments` as a plain string array) is produced exactly, with no wrapper and no `REPLACE`/`TRIM` munging. The spike just confirms it on 11.6 (the JSON Object Model is standard there).
-2. **Error semantics** — ✅ **RESOLVED by design.** The **`OpenEdge.Web.WebHandler`** sets the real HTTP status code directly on the response and writes the structured `Error` body — no legacy `httpResponse`-string ambiguity. So `404`/`503`/`504` are real status lines the SaaS reads (the SOL-55/SOL-56 path).
+2. **Error semantics** — ✅ **RESOLVED (revised binding).** ~~The `OpenEdge.Web.WebHandler` sets the status code directly~~ → on the 11.6 target the **classic REST adapter `.p`** sets the real HTTP status via `useReturnValue="true"` + `RETURN "<code>"` and returns the structured `Error` body as a LONGCHAR OUTPUT param — no legacy `httpResponse`-string ambiguity. So `404`/`503`/`504` are real status lines the SaaS reads (the SOL-55/SOL-56 path). See the Binding-Model Correction above.
 3. **Latency / payload** — ⏳ **OPEN (measurement).** Worst-case cover-sheet response time/size against MPI's v10 schema — confirm on the spike (progress-rest §8 Q7).
 4. **Auto-reconnect** — ◑ **Design resolved, one fact to confirm.** Persistent per-session connection + per-request `CONNECTED()` health-check/reconnect (one `EnsureConnected` helper). Open: the exact OE connection-failure error code(s) on broker restart, so reconnect triggers only on real disconnects. See `resilience-and-errors.md`.
 
@@ -36,9 +69,12 @@ Squirrel's Progress-REST work (`ClearVueSaaS/docs/modules/Integrations/progress-
 - OpenEdge **11.6** (hard requirement; MPI is on a v10-era MFG/PRO *application* but the OE
   *platform* is 11.6).
 - App server: **PASOE** (PAS for OpenEdge) with the REST/Web transport.
-- REST handler style: **`OpenEdge.Web.WebHandler` subclass** (DECIDED). Full control over
-  routing, reading the auth header, setting the HTTP status code, and composing the JSON body.
-  (Not the DataObject service / WebSpeed.)
+- REST handler style: ~~**`OpenEdge.Web.WebHandler` subclass** (DECIDED)~~ **SUPERSEDED — see the
+  Binding-Model Correction at the top.** On 11.6 a class cannot bind to a REST resource URI, so
+  the entry seam is a **classic OpenEdge REST adapter `.p`** (annotated `@openapi.openedge.export
+  FILE(type="REST" …)`) with mapped INPUT/OUTPUT params; status via `useReturnValue="true"` +
+  `RETURN "<code>"`, auth header via a `type="HEADER"` param, body via a LONGCHAR OUTPUT param.
+  (Still not the DataObject service / WebSpeed; still hand-composed JSON.)
 
 ## 2. Database connectivity
 
@@ -76,16 +112,19 @@ over the nested cover-sheet envelope (header object + structure/route arrays + c
 > the *serialization* changes — pull rows into temp-tables/buffers as today, then compose the
 > JSON by hand instead of `WRITE-JSON` + munge.
 
-## 4. Auth — DECIDED: API key in a header, validated in the handler
+## 4. Auth — DECIDED: API key in a header, validated in the entry seam
 
-Read the API key from a request header in the WebHandler and compare to a configured secret;
-reject with `401 UNAUTHORIZED` on mismatch. (Not `oeablSecurity` — simpler, and matches the
-contract's enforced-header model.)
+Read the API key from a request header and compare to a configured secret; reject with
+`401 UNAUTHORIZED` on mismatch. (Not `oeablSecurity` — simpler, and matches the contract's
+enforced-header model.) **Revised binding:** the header is surfaced to the mapped `.p` as a
+CHARACTER input param via a `type="HEADER"` mapping (`config/resourceModel.example.xml`), then
+validated by `ApiKeyAuthenticator:IsAuthorizedHeader()`. The classic REST adapter CAN map a
+request header to a param — important, because PASOE Web handlers cannot read `Authorization`.
 
-- _TODO (spike): header name — `Authorization: Bearer <key>` vs `X-API-Key`. Align with the
-  contract's `BearerAuth` scheme (lean `Authorization: Bearer`)._
+- Header name: **`Authorization: Bearer <key>`** (aligns with the contract's `BearerAuth`). DECIDED.
 - _TODO: where the secret lives on the connector host (config / OS secret store) — never in
-  source, never sent to the SaaS._
+  source, never sent to the SaaS._ (Implemented: `CLEARVUE_CONNECTOR_API_KEY` via `ConnectorConfig`,
+  fail-closed if unset.)
 
 ## 5. Performance envelope
 
@@ -105,9 +144,9 @@ contract's enforced-header model.)
 
 | Operation | Producible on 11.6? | Notes |
 |---|---|---|
-| `/health` | ✅ | WebHandler; optional lightweight `CONNECTED()` probe. |
-| `/product-structure` | ✅ | Flat `JsonArray`; legacy `xx-bmpsrp.p` query logic. |
-| `/product-route` | ✅ | Flat `JsonArray`; legacy `xx-rorp.p` query logic. |
+| `/health` | ✅ | REST-adapter `.p` (`GetHealth.p`); lightweight `CONNECTED()` probe; always 200. |
+| `/product-structure` | ✅ | REST-adapter `.p` (`GetProductStructure.p`); flat `JsonArray`; legacy `xx-bmpsrp.p` query logic. |
+| `/product-route` | ✅ | REST-adapter `.p`; flat `JsonArray`; legacy `xx-rorp.p` query logic. |
 | `/product-cover-sheet` | ✅ design-cleared; latency TBM | Nested envelope hand-composed via JSON Object Model; a *compose* step once the pieces are proven. |
 
 **POC order (walking skeleton):** `/health` (step 0 — proves PASOE deploy + DB connection + auth) → **`/product-structure`** (the real POC: first query, flat `JsonArray`, formatting, **reconnect**, **latency** — exercises every cross-cutting concern) → `/product-route` → `/product-cover-sheet` (compose the nested envelope from the now-proven structure/route pieces + header + comments). The cover sheet no longer needs to go first: its only unique risk — nested serialization — was retired by the JSON Object Model decision (§3), so build the thinnest slice first and let the envelope be an incremental compose. The structure POC must explicitly prove the two genuinely-open items: DB-restart reconnect and cover-sheet-scale latency.
@@ -116,7 +155,8 @@ contract's enforced-header model.)
 
 - Does the nested cover-sheet serialize natively, or do we flatten? → **Resolved:** hand-build
   with the JSON Object Model; the envelope stays exactly as the contract specifies (no flatten).
-- Final auth mechanism? → **Resolved:** API key in a header, validated in the WebHandler.
+- Final auth mechanism? → **Resolved:** API key in the `Authorization: Bearer` header, mapped to
+  the REST-adapter `.p` as a `type="HEADER"` param and validated by `ApiKeyAuthenticator`.
 - Any field 11.6 can't cleanly produce? → **None expected** — the JSON Object Model gives full
   control; only date/decimal *formatting* to settle on the spike (not a shape change).
 

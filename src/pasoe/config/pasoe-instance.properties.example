@@ -1,0 +1,19 @@
+# --------------------------------------------------------------------------
+# PASOE instance settings for the connector (EXAMPLE -- merge into the
+# instance's conf/openedge.properties; do NOT commit the live instance file).
+#
+# The URI->procedure routing is NOT here -- in the classic REST adapter model
+# that lives in the REST resource mapping (config/resourceModel.example.xml),
+# packaged into a .paar under PASOEContent/WEB-INF/adapters/rest/<service>/.
+# This file covers the two instance-level settings the connector needs.
+# --------------------------------------------------------------------------
+
+# --- session-activate hook: persistent per-session DB connection ---
+# Connect once at session-activate; per-request EnsureConnected() reconnects.
+[<instance>.<app>.APSV]
+srvrActivateProc=ClearVue/Connector/Data/SessionActivate.p
+
+# --- PROPATH must include the compiled connector root (src/pasoe) so the
+#     mapped .p's and the OOABL classes resolve, plus the OpenEdge JSON/Net
+#     assemblies (standard on 11.6). ---
+# PROPATH=$CATALINA_BASE/openedge,/opt/clearvue/connector/src/pasoe,...

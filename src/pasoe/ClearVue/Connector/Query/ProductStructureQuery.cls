@@ -28,9 +28,10 @@
       - DB resilience delegated to DatabaseConnection:EnsureConnected() before
         any read; connection-loss mid-explosion surfaces as a contract error.
 
-    The temp-table is the connector-internal shape (canonical names). The
-    WebHandler composes the JSON array from it via the JSON Object Model -- this
-    class does NOT serialize (single responsibility; no WRITE-JSON, no munging).
+    The temp-table is the connector-internal shape (canonical names).
+    ProductStructureJsonComposer composes the JSON array from it via the JSON
+    Object Model -- this class does NOT serialize (single responsibility; no
+    WRITE-JSON, no munging).
 
     One responsibility: produce structure rows. No JSON, no auth, no HTTP.
   ----------------------------------------------------------------------*/
@@ -76,8 +77,8 @@ CLASS ClearVue.Connector.Query.ProductStructureQuery:
             oDb     = poDb.
     END CONSTRUCTOR.
 
-    /* Expose the result temp-table by HANDLE so the WebHandler can iterate it
-       with a dynamic query (an instance temp-table member can't be used in a
+    /* Expose the result temp-table by HANDLE so the JSON composer can iterate
+       it with a dynamic query (an instance temp-table member can't be used in a
        static FOR EACH from another class). Rows are in SeqNo (explosion) order. */
     METHOD PUBLIC HANDLE GetResultsHandle():
         RETURN TEMP-TABLE ttProductStructure:HANDLE.

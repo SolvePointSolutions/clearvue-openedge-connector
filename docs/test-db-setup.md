@@ -65,11 +65,13 @@ proserve clearvue-test -S 50000 -H localhost
 # point CLEARVUE_DB_CONNECT_PARAMS at it; set CLEARVUE_ERP_DOMAIN=MPI
 ```
 
-A single-user smoke check without PASOE:
+A single-user smoke check without PASOE (run the entry .p directly, which calls
+the same OOABL logic the REST adapter would):
 
 ```sh
-pro -db clearvue-test -ld qaddb -1
-# then run the query class against part PUMP-ASSY-100, site 1000, domain MPI
+pro -db clearvue-test -ld qaddb -1 -p ClearVue/Connector/Rest/GetProductStructure.p
+# (set CLEARVUE_ERP_DOMAIN=MPI and CLEARVUE_CONNECTOR_API_KEY first; pass
+#  part=PUMP-ASSY-100 site=1000 and "Bearer <key>" as the authorization param.)
 ```
 
 ## Expected output (deterministic — diff target)

@@ -39,16 +39,21 @@ Field names in the contract are canonical; this connector emits them directly.
 ```
 openapi/   The versioned REST contract (source of truth)
 src/pasoe/ The OpenEdge 11.6 / PASOE web application
-           ClearVue/Connector/{Web,Data,Query,Security,Config,Json}/  (ABL OO, ClearVue.Connector.*)
-           config/  PASOE handler-route + .pf + env templates (*.example only)
+           ClearVue/Connector/Rest/      mapped .p REST-adapter entry seams (/health, /product-structure)
+           ClearVue/Connector/{Query,Data,Security,Config,Json,Web}/  OOABL logic (ClearVue.Connector.*)
+           config/  REST resource mapping + .pf + env templates (*.example only)
 tests/     ABLUnit tests for the connector's pure (non-DB) logic
-docs/      Design notes: 11.6 feasibility envelope, resilience/errors, deploy-and-run
+docs/      Design notes: 11.6 feasibility envelope, resilience/errors, deploy-and-run, test-db setup
 samples/   Example responses (*.example.json only; no customer data committed)
 ```
 
 The walking-skeleton POC (SOL-58) implements `/health` and `/product-structure`.
+On OpenEdge 11.6 a REST resource URI cannot bind to a class, so each endpoint's
+entry point is a **classic REST-adapter `.p`** (under `Rest/`) that calls the
+OOABL logic classes — see the Binding-Model Correction in
+[docs/feasibility-11.6.md](docs/feasibility-11.6.md).
 See [docs/deploy-and-run-11.6.md](docs/deploy-and-run-11.6.md) to compile, deploy,
-and run it on a real OpenEdge 11.6 / PASOE box, and to prove the two open items
+and run it on a real OpenEdge 11.6 / PASOE box, and to prove the open items
 (auto-reconnect on a DB restart and end-to-end latency).
 
 ## A note on QAD intellectual property

@@ -1,12 +1,17 @@
 /*------------------------------------------------------------------------
     File        : ApiKeyAuthenticator.cls
     Package     : ClearVue.Connector.Security
-    Purpose     : Enforce the contract's BearerAuth scheme in the WebHandler.
+    Purpose     : Enforce the contract's BearerAuth scheme.
 
-    Reads `Authorization: Bearer <key>` from the request and compares the
-    presented key to the configured shared secret (ConnectorConfig:GetApiKey,
-    sourced from the environment / OS secret store -- never source). Returns
-    TRUE only on an exact match.
+    Compares the presented `Authorization: Bearer <key>` value to the configured
+    shared secret (ConnectorConfig:GetApiKey, sourced from the environment / OS
+    secret store -- never source). Returns TRUE only on an exact match.
+
+    Transport-agnostic by design. In the OpenEdge 11.6 target the REST entry is
+    a mapped .p (classic REST adapter), so the inbound Authorization header is
+    surfaced to the .p as a CHARACTER input param and passed to
+    IsAuthorizedHeader(). The core bearer-extraction + fail-closed logic lives
+    here once; the .p does no auth logic of its own.
 
     Fail closed: if no secret is configured, NOTHING authorizes (an unset key
     must never become an open door).
@@ -15,8 +20,6 @@
   ----------------------------------------------------------------------*/
 
 USING Progress.Lang.*.
-USING OpenEdge.Web.IWebRequest.
-USING OpenEdge.Net.HTTP.HttpHeader.
 USING ClearVue.Connector.Config.ConnectorConfig.
 
 BLOCK-LEVEL ON ERROR UNDO, THROW.
@@ -29,12 +32,12 @@ CLASS ClearVue.Connector.Security.ApiKeyAuthenticator:
         ASSIGN oConfig = poConfig.
     END CONSTRUCTOR.
 
-    /* TRUE iff the request carries a valid bearer token matching the secret. */
-    METHOD PUBLIC LOGICAL IsAuthorized(INPUT poRequest AS IWebRequest):
-        DEFINE VARIABLE oHeader    AS HttpHeader NO-UNDO.
-        DEFINE VARIABLE cHeader    AS CHARACTER  NO-UNDO.
-        DEFINE VARIABLE cPresented AS CHARACTER  NO-UNDO.
-        DEFINE VARIABLE cSecret    AS CHARACTER  NO-UNDO.
+    /* THE entry point for the .p model: validate a raw Authorization header
+       value (e.g. "Bearer abc123") mapped from the REST request to a param.
+       TRUE iff it carries a bearer token matching the configured secret. */
+    METHOD PUBLIC LOGICAL IsAuthorizedHeader(INPUT pcAuthHeader AS CHARACTER):
+        DEFINE VARIABLE cPresented AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE cSecret    AS CHARACTER NO-UNDO.
 
         cSecret = oConfig:GetApiKey().
 
@@ -42,21 +45,10 @@ CLASS ClearVue.Connector.Security.ApiKeyAuthenticator:
         IF cSecret = ? OR cSecret = "":U THEN
             RETURN FALSE.
 
-        /* GetHeader returns an HttpHeader object on 11.6; read its :Value.
-           HasHeader guards the absent-header case (GetHeader can throw/return
-           a sentinel when the header is missing). */
-        IF NOT poRequest:HasHeader("Authorization":U) THEN
+        IF pcAuthHeader = ? OR pcAuthHeader = "":U THEN
             RETURN FALSE.
 
-        oHeader = poRequest:GetHeader("Authorization":U) NO-ERROR.
-        IF NOT VALID-OBJECT(oHeader) THEN
-            RETURN FALSE.
-
-        cHeader = oHeader:Value.
-        IF cHeader = ? OR cHeader = "":U THEN
-            RETURN FALSE.
-
-        cPresented = ExtractBearer(cHeader).
+        cPresented = ExtractBearer(pcAuthHeader).
         IF cPresented = "":U THEN
             RETURN FALSE.
 
