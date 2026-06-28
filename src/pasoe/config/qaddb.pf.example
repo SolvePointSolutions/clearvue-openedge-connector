@@ -1,0 +1,17 @@
+# --------------------------------------------------------------------------
+# Client/server connection parameter file for the MFG/PRO database.
+# EXAMPLE / TEMPLATE ONLY -- copy to qaddb.pf.local (gitignored), fill in the
+# real host/port, and point CLEARVUE_DB_CONNECT_PARAMS at it:
+#     CLEARVUE_DB_CONNECT_PARAMS="-pf /etc/clearvue/qaddb.pf.local"
+#
+# Use a READ-ONLY DB account (least privilege) -- the connector never writes.
+# Never commit the live .pf (it carries the customer's host/port and is
+# .gitignore'd as *.pf.local). No QAD schema (*.df) is shipped here.
+# --------------------------------------------------------------------------
+
+-db   mfgprod          # physical DB name
+-ld   qaddb            # logical name the connector CONNECTED()/queries by
+-S    <broker-port>    # e.g. 50000
+-H    <db-host>        # e.g. db.internal.example.com  (NEVER a real host in git)
+-RO                    # read-only client/server connection (defense in depth)
+-T    /tmp/clearvue    # temp dir

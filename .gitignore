@@ -1,0 +1,52 @@
+# ---- QAD / ERP intellectual property — NEVER commit ----
+# QAD MFG/PRO data dictionary and any schema dumps are QAD's property.
+*.df
+mfgprod.df
+*.dictionary
+# Captured ERP responses may contain customer data — keep samples local unless scrubbed.
+samples/**/*.json
+!samples/**/*.example.json
+
+# ---- OpenEdge / Progress build & runtime artifacts ----
+*.r
+*.pl
+*.rpr
+*.lst
+*.xref
+*.cache
+.buildervars
+.pct/
+build/
+deploy/
+*.lk
+lbi/
+# Progress local databases / logs / before-image / lock files
+*.db
+*.b1
+*.d1
+*.lg
+*.lic
+*.lk
+
+# ---- PASOE / Tomcat instance artifacts ----
+oeablSecurity.local.properties
+*.paar.bak
+work/
+temp/
+logs/
+*.log
+
+# ---- Secrets / local config ----
+*.pf.local
+appsettings.local.*
+.env
+.env.*
+secrets/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
