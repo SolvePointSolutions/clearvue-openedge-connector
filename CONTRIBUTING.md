@@ -8,9 +8,20 @@ Thanks for your interest in the ClearVue OpenEdge Connector.
   names, paths, or status codes is a change to [`openapi/`](openapi/) first, reviewed as a
   potential breaking-API change, and then reflected in the implementation. Don't let the code
   and the contract drift.
-- **Target OpenEdge 11.6.** This connector must run on an 11.6 runtime (PASOE + the REST/Web
-  handlers). Don't introduce a dependency on a newer OpenEdge feature without raising it —
-  see [`docs/feasibility-11.6.md`](docs/feasibility-11.6.md).
+- **Target OpenEdge 11.6 — ABL language level 11.6.** This connector must compile and run on an
+  **OpenEdge 11.6** runtime (PASOE + the classic REST adapter). Treat **11.6 as the ABL language
+  baseline**: do not use any ABL syntax, class, method, overload, or property feature introduced
+  after 11.6 without raising it first — see [`docs/feasibility-11.6.md`](docs/feasibility-11.6.md)
+  (ABL Language Baseline section). Known post-11.6 / fragile-on-11.6 constructs to AVOID:
+  - **Inline method-on-method-return chaining** — `obj:MethodA():MethodB()`. Assign the
+    intermediate object to a typed variable first. *(Chaining a handle attribute such as
+    `hBuf:BUFFER-FIELD("x"):BUFFER-VALUE` is a different, long-supported idiom and is fine.)*
+  - Newer `Progress.Lang.*` / `OpenEdge.Core.*` / JSON-Object-Model members, constructors, or
+    overloads added after 11.6; the `SERIALIZABLE` class attribute; later string-interpolation /
+    pipe / generic-collection syntax. When in doubt, verify the member's introduced-version
+    against the 11.6 ABL reference before using it.
+  Because the dev machines have no `$DLC`, a clean compile is **[LIVE-ONLY]** (the 11.6 box is the
+  final gate); these conventions catch the common breakages before they get there.
 - **This repo is the only home for OpenEdge ABL/4GL.** ClearVue SaaS is .NET-only — no ABL
   belongs in the ClearVueSaaS repo. (The C# ConnectorAgent worker lives there; that's not ABL.)
 - **Wire formats.** Dates are **ISO 8601** strings; decimals are **JSON numbers** (invariant

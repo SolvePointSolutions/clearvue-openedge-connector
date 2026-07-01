@@ -138,10 +138,19 @@ CLASS ClearVue.Connector.Web.ConnectorError INHERITS Progress.Lang.AppError:
     END METHOD.
 
     /* Convenience for the classic-REST-adapter .p entry seam: render the
-       contract Error body straight to LONGCHAR for the OUTPUT param. */
+       contract Error body straight to LONGCHAR for the OUTPUT param.
+
+       NOTE (OpenEdge 11.6): do NOT chain a method call on a method's return
+       value (e.g. THIS-OBJECT:ToJson():Write(...)). Inline method-on-method-
+       return chaining is not reliably supported on the 11.6 ABL language level;
+       assign the intermediate object to a typed variable first. (Chaining a
+       handle attribute like hBuffer:BUFFER-FIELD():BUFFER-VALUE is a different,
+       long-supported idiom and is fine.) */
     METHOD PUBLIC LONGCHAR ToJsonString():
-        DEFINE VARIABLE lcBody AS LONGCHAR NO-UNDO.
-        THIS-OBJECT:ToJson():Write(OUTPUT lcBody).
+        DEFINE VARIABLE oJson  AS JsonObject NO-UNDO.
+        DEFINE VARIABLE lcBody AS LONGCHAR   NO-UNDO.
+        oJson = THIS-OBJECT:ToJson().
+        oJson:Write(OUTPUT lcBody).
         RETURN lcBody.
     END METHOD.
 
