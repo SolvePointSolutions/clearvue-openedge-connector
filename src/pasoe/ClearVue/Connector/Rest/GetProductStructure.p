@@ -26,7 +26,8 @@
     real status codes are set from the .p -- not crammed into the body.
 
     AUTH HEADER: the inbound `Authorization` header is surfaced to the .p as the
-    `authorization` INPUT param, mapped in the REST resource as a HEADER param
+    `authHeader` INPUT param (NOT `authorization` -- that is a RESERVED ABL
+    keyword and will not compile), mapped in the REST resource as a HEADER param
     (see config/resourceModel.example.xml). PASOE may strip Authorization for
     Web handlers, but the classic REST adapter can map it to a CHARACTER param.
 
@@ -34,7 +35,7 @@
       part          QUERY   required
       site          QUERY   required
       correlationId QUERY   optional
-      authorization HEADER  ("Authorization")
+      authHeader    HEADER  ("Authorization")
     OUTPUT:
       responseBody  LONGCHAR  the JSON array (200) or the contract Error body.
   ----------------------------------------------------------------------*/
@@ -44,7 +45,7 @@ BLOCK-LEVEL ON ERROR UNDO, THROW.
 USING ClearVue.Connector.Config.ConnectorConfig.
 USING ClearVue.Connector.Data.DatabaseConnection.
 USING ClearVue.Connector.Security.ApiKeyAuthenticator.
-USING ClearVue.Connector.Query.ProductStructureQuery.
+USING ClearVue.Connector.Queries.ProductStructureQuery.
 USING ClearVue.Connector.Json.ProductStructureJsonComposer.
 USING ClearVue.Connector.Web.ConnectorError.
 
@@ -52,7 +53,12 @@ USING ClearVue.Connector.Web.ConnectorError.
 DEFINE INPUT  PARAMETER part          AS CHARACTER NO-UNDO.
 DEFINE INPUT  PARAMETER site          AS CHARACTER NO-UNDO.
 DEFINE INPUT  PARAMETER correlationId AS CHARACTER NO-UNDO.
-DEFINE INPUT  PARAMETER authorization AS CHARACTER NO-UNDO.
+/* NB: the param is authHeader, NOT `authorization` -- AUTHORIZATION is a
+   RESERVED ABL keyword on 11.6, so a param/variable named `authorization`
+   fails to compile (254/247). The inbound HTTP header is still "Authorization";
+   only the ABL identifier differs. The REST mapping binds headerName=
+   "Authorization" to this param via name="authHeader". */
+DEFINE INPUT  PARAMETER authHeader    AS CHARACTER NO-UNDO.
 DEFINE OUTPUT PARAMETER responseBody  AS LONGCHAR  NO-UNDO.
 
 /* ---- locals ---- */
@@ -76,7 +82,7 @@ oConfig = NEW ConnectorConfig().
 
 /* 1. auth first -- no DB work for an unauthorized caller */
 oAuth = NEW ApiKeyAuthenticator(oConfig).
-IF NOT oAuth:IsAuthorizedHeader(authorization) THEN
+IF NOT oAuth:IsAuthorizedHeader(authHeader) THEN
     RETURN FailWith(ConnectorError:Unauthorized()).
 
 /* 2. validate params */

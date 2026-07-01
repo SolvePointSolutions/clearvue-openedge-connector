@@ -37,8 +37,11 @@
       <prgs:param name="part"          type="QUERY"/>
       <prgs:param name="site"          type="QUERY"/>
       <prgs:param name="correlationId" type="QUERY"/>
-      <!-- map the inbound Authorization header to the .p's `authorization` param -->
-      <prgs:param name="authorization" type="HEADER" headerName="Authorization"/>
+      <!-- map the inbound Authorization header to the .p's `authHeader` param.
+           NB: the param is named authHeader, NOT authorization -- AUTHORIZATION
+           is a reserved ABL keyword and cannot be a parameter name on 11.6.
+           headerName stays "Authorization" (the real HTTP header). -->
+      <prgs:param name="authHeader" type="HEADER" headerName="Authorization"/>
     </prgs:operation>
   </prgs:resource>
 

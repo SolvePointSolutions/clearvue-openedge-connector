@@ -18,6 +18,13 @@
 
 USING Progress.Lang.*.
 USING Progress.Json.ObjectModel.JsonObject.
+/* This class refers to itself as a type (static factory return types and
+   NEW <self>). On 11.6 the class's own SHORT name does not resolve as a datatype
+   without help, and a class must NOT wildcard-import its OWN package to fix that
+   -- a self-referential `USING ClearVue.Connector.Web.*.` makes this class fail
+   to compile, which then shows up as "could not find class ConnectorError" in
+   every consumer (DatabaseConnection, the .p seams). The correct fix is to
+   FULLY QUALIFY the self-references below; no self-USING. */
 
 BLOCK-LEVEL ON ERROR UNDO, THROW.
 
@@ -50,7 +57,11 @@ CLASS ClearVue.Connector.Web.ConnectorError INHERITS Progress.Lang.AppError:
                                        INPUT piRetryAfter AS INTEGER,
                                        INPUT pcMessage   AS CHARACTER,
                                        INPUT pcDiagnostic AS CHARACTER):
-        SUPER(pcMessage).
+        /* AppError has no single-CHARACTER constructor on 11.6 -- only
+           AppError() and AppError(message, messageNum). Pass 0 as the
+           messageNum sentinel; the text still registers so GetMessage(1)/
+           NumMessages work on a caught ConnectorError. */
+        SUPER(pcMessage, 0).
         ASSIGN
             THIS-OBJECT:Code              = pcCode
             THIS-OBJECT:Category          = pcCategory
@@ -69,49 +80,49 @@ CLASS ClearVue.Connector.Web.ConnectorError INHERITS Progress.Lang.AppError:
        infer a datatype for the unknown-value literal in a call argument position.
        "":U is behaviorally identical here: ToJson() omits an empty diagnostic
        (see the diagnostic guard below), so the wire Error body is unchanged. */
-    METHOD PUBLIC STATIC ConnectorError BadRequest(INPUT pcMessage AS CHARACTER):
-        RETURN NEW ConnectorError("BAD_REQUEST":U, "REQUEST":U, FALSE, 400, 0,
+    METHOD PUBLIC STATIC ClearVue.Connector.Web.ConnectorError BadRequest(INPUT pcMessage AS CHARACTER):
+        RETURN NEW ClearVue.Connector.Web.ConnectorError("BAD_REQUEST":U, "REQUEST":U, FALSE, 400, 0,
                                   pcMessage, "":U).
     END METHOD.
 
-    METHOD PUBLIC STATIC ConnectorError Unauthorized():
-        RETURN NEW ConnectorError("UNAUTHORIZED":U, "AUTH":U, FALSE, 401, 0,
+    METHOD PUBLIC STATIC ClearVue.Connector.Web.ConnectorError Unauthorized():
+        RETURN NEW ClearVue.Connector.Web.ConnectorError("UNAUTHORIZED":U, "AUTH":U, FALSE, 401, 0,
                                   "Missing or invalid credentials.":U, "":U).
     END METHOD.
 
-    METHOD PUBLIC STATIC ConnectorError NotFound(INPUT pcMessage AS CHARACTER):
-        RETURN NEW ConnectorError("NOT_FOUND":U, "DATA":U, FALSE, 404, 0,
+    METHOD PUBLIC STATIC ClearVue.Connector.Web.ConnectorError NotFound(INPUT pcMessage AS CHARACTER):
+        RETURN NEW ClearVue.Connector.Web.ConnectorError("NOT_FOUND":U, "DATA":U, FALSE, 404, 0,
                                   pcMessage, "":U).
     END METHOD.
 
     /* Existing connection dropped (DB restart) and reconnect failed in budget. */
-    METHOD PUBLIC STATIC ConnectorError ErpDisconnected(INPUT pcDiagnostic AS CHARACTER):
-        RETURN NEW ConnectorError("ERP_DISCONNECTED":U, "ERP_CONNECTIVITY":U, TRUE, 503, 5,
+    METHOD PUBLIC STATIC ClearVue.Connector.Web.ConnectorError ErpDisconnected(INPUT pcDiagnostic AS CHARACTER):
+        RETURN NEW ClearVue.Connector.Web.ConnectorError("ERP_DISCONNECTED":U, "ERP_CONNECTIVITY":U, TRUE, 503, 5,
                                   "ERP database is restarting; retry shortly.":U,
                                   pcDiagnostic).
     END METHOD.
 
     /* Host/broker not reachable at all. */
-    METHOD PUBLIC STATIC ConnectorError ErpUnavailable(INPUT pcDiagnostic AS CHARACTER):
-        RETURN NEW ConnectorError("ERP_UNAVAILABLE":U, "ERP_CONNECTIVITY":U, TRUE, 503, 5,
+    METHOD PUBLIC STATIC ClearVue.Connector.Web.ConnectorError ErpUnavailable(INPUT pcDiagnostic AS CHARACTER):
+        RETURN NEW ClearVue.Connector.Web.ConnectorError("ERP_UNAVAILABLE":U, "ERP_CONNECTIVITY":U, TRUE, 503, 5,
                                   "ERP database is unreachable.":U,
                                   pcDiagnostic).
     END METHOD.
 
-    METHOD PUBLIC STATIC ConnectorError ErpTimeout(INPUT pcDiagnostic AS CHARACTER):
-        RETURN NEW ConnectorError("ERP_TIMEOUT":U, "ERP_CONNECTIVITY":U, TRUE, 504, 3,
+    METHOD PUBLIC STATIC ClearVue.Connector.Web.ConnectorError ErpTimeout(INPUT pcDiagnostic AS CHARACTER):
+        RETURN NEW ClearVue.Connector.Web.ConnectorError("ERP_TIMEOUT":U, "ERP_CONNECTIVITY":U, TRUE, 504, 3,
                                   "ERP query exceeded the time budget.":U,
                                   pcDiagnostic).
     END METHOD.
 
-    METHOD PUBLIC STATIC ConnectorError ErpQueryError(INPUT pcDiagnostic AS CHARACTER):
-        RETURN NEW ConnectorError("ERP_QUERY_ERROR":U, "INTERNAL":U, FALSE, 502, 0,
+    METHOD PUBLIC STATIC ClearVue.Connector.Web.ConnectorError ErpQueryError(INPUT pcDiagnostic AS CHARACTER):
+        RETURN NEW ClearVue.Connector.Web.ConnectorError("ERP_QUERY_ERROR":U, "INTERNAL":U, FALSE, 502, 0,
                                   "ERP query failed.":U,
                                   pcDiagnostic).
     END METHOD.
 
-    METHOD PUBLIC STATIC ConnectorError Internal(INPUT pcDiagnostic AS CHARACTER):
-        RETURN NEW ConnectorError("INTERNAL":U, "INTERNAL":U, FALSE, 500, 0,
+    METHOD PUBLIC STATIC ClearVue.Connector.Web.ConnectorError Internal(INPUT pcDiagnostic AS CHARACTER):
+        RETURN NEW ClearVue.Connector.Web.ConnectorError("INTERNAL":U, "INTERNAL":U, FALSE, 500, 0,
                                   "An unexpected connector error occurred.":U,
                                   pcDiagnostic).
     END METHOD.
