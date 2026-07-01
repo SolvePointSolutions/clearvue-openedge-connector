@@ -109,7 +109,8 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
         DEFINE VARIABLE oJson AS JsonObject NO-UNDO.
         oJson = NEW JsonObject().
         JsonFormat:AddDateOrNull(oJson, "StartDate":U, DATE(1, 15, 2026)).
-        JsonFormat:AddDateOrNull(oJson, "EndDate":U,   ?).
+        /* DATE(?) -- a typed unknown DATE, not a bare ? (bare ? -> 11.6 error 5638). */
+        JsonFormat:AddDateOrNull(oJson, "EndDate":U,   DATE(?)).
         Assert:Equals("2026-01-15":U, oJson:GetCharacter("StartDate":U)).
         Assert:IsTrue(oJson:IsNull("EndDate":U)).
     END METHOD.
@@ -155,7 +156,9 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
         oAuth = NEW ClearVue.Connector.Security.ApiKeyAuthenticator(oCfg).
         /* no secret configured in a bare unit env -> fail closed regardless */
         Assert:IsFalse(oAuth:IsAuthorizedHeader("":U)).
-        Assert:IsFalse(oAuth:IsAuthorizedHeader(?)).
+        /* STRING(?) -- a typed unknown CHARACTER (the unknown/missing-header case),
+           not a bare ? (bare ? -> 11.6 error 5638). Still proves ? is unauthorized. */
+        Assert:IsFalse(oAuth:IsAuthorizedHeader(STRING(?))).
         Assert:IsFalse(oAuth:IsAuthorizedHeader("Bearer anything":U)).
     END METHOD.
 

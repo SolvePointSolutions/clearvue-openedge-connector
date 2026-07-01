@@ -63,19 +63,25 @@ CLASS ClearVue.Connector.Web.ConnectorError INHERITS Progress.Lang.AppError:
 
     /* ---- Factories: one per contract code, mapping baked in. ---- */
 
+    /* pcDiagnostic is passed as "":U (a typed CHARACTER sentinel), NOT a bare ?.
+       A bare ? argument to this class constructor fails to compile on OpenEdge
+       11.6 with error 5638 "Invalid datatype specified" -- the compiler cannot
+       infer a datatype for the unknown-value literal in a call argument position.
+       "":U is behaviorally identical here: ToJson() omits an empty diagnostic
+       (see the diagnostic guard below), so the wire Error body is unchanged. */
     METHOD PUBLIC STATIC ConnectorError BadRequest(INPUT pcMessage AS CHARACTER):
         RETURN NEW ConnectorError("BAD_REQUEST":U, "REQUEST":U, FALSE, 400, 0,
-                                  pcMessage, ?).
+                                  pcMessage, "":U).
     END METHOD.
 
     METHOD PUBLIC STATIC ConnectorError Unauthorized():
         RETURN NEW ConnectorError("UNAUTHORIZED":U, "AUTH":U, FALSE, 401, 0,
-                                  "Missing or invalid credentials.":U, ?).
+                                  "Missing or invalid credentials.":U, "":U).
     END METHOD.
 
     METHOD PUBLIC STATIC ConnectorError NotFound(INPUT pcMessage AS CHARACTER):
         RETURN NEW ConnectorError("NOT_FOUND":U, "DATA":U, FALSE, 404, 0,
-                                  pcMessage, ?).
+                                  pcMessage, "":U).
     END METHOD.
 
     /* Existing connection dropped (DB restart) and reconnect failed in budget. */

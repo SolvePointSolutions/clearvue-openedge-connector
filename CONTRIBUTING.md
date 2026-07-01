@@ -16,6 +16,14 @@ Thanks for your interest in the ClearVue OpenEdge Connector.
   - **Inline method-on-method-return chaining** — `obj:MethodA():MethodB()`. Assign the
     intermediate object to a typed variable first. *(Chaining a handle attribute such as
     `hBuf:BUFFER-FIELD("x"):BUFFER-VALUE` is a different, long-supported idiom and is fine.)*
+  - **Bare Unknown value `?` as a class constructor/method argument** — e.g.
+    `NEW ConnectorError(…, ?)` or `oAuth:IsAuthorizedHeader(?)`. On 11.6 the compiler cannot
+    infer a datatype for a bare `?` in a call-argument position and rejects it with **error 5638
+    "Invalid datatype specified."** Pass a **typed sentinel** (e.g. `"":U` for a CHARACTER
+    diagnostic that is omitted downstream anyway) or a **conversion-function-wrapped unknown**
+    (`STRING(?)`, `DATE(?)`, `INTEGER(?)`, …) so the argument's datatype is explicit. *(A bare `?`
+    in a comparison (`x <> ?`) or assigned to a typed target is a different, fine idiom — this rule
+    is specifically about `?` passed as a call argument.)*
   - Newer `Progress.Lang.*` / `OpenEdge.Core.*` / JSON-Object-Model members, constructors, or
     overloads added after 11.6; the `SERIALIZABLE` class attribute; later string-interpolation /
     pipe / generic-collection syntax. When in doubt, verify the member's introduced-version
