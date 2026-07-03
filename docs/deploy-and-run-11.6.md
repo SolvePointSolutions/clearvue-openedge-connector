@@ -84,8 +84,13 @@ The entry points are mapped `.p`'s, not handler classes:
    wire them in the REST editor):
    - `GET /health` → `ClearVue/Connector/Rest/GetHealth.p`
    - `GET /product-structure` → `ClearVue/Connector/Rest/GetProductStructure.p`, with
-     `part`/`site`/`correlationId` as QUERY params and `Authorization` as a HEADER param mapped to
-     the `authorization` input.
+     `part`/`site`/`correlationId` as QUERY params and the `Authorization` HEADER mapped to the
+     `.p`'s `authHeader` input param. **Two distinct names, do not mix them up:** the ABL param is
+     `authHeader` (the identifier `authorization` is a reserved ABL keyword on 11.6 and will not
+     compile); the header value expression reads the real inbound header, i.e.
+     `${http.header['Authorization']}` — **not** `${http.header['authHeader']}`. Mapping the value
+     from `authHeader` reads a header that does not exist, hands the `.p` an empty string, and
+     `ApiKeyAuthenticator` fails closed → 401. See `config/resourceModel.example.xml`.
    Publish/package the service into a **`.paar`** and deploy it under
    `PASOEContent/WEB-INF/adapters/rest/<service>/` on the instance (`oedeploy` / PDSOE publish).
 2. **Session-activate.** Merge `config/pasoe-instance.properties.example` into the instance's
@@ -166,8 +171,8 @@ test DB per `docs/test-db-setup.md`, connect it as `-ld qaddb`, and diff the
 | Clean compile vs schema + OE 11.6 | not done here | compile on the box (or the synthetic DB, docs/test-db-setup.md) |
 | End-to-end run vs a DB | runnable on the synthetic DB | build fixtures + diff expected JSON |
 | REST `.paar` build + URI mapping | mapping authored (`resourceModel.example.xml`); **not packaged** | build/publish the REST service on the box (§4) |
-| `useReturnValue` status mapping | designed; **unverified on 11.6** | confirm RETURN "<code>" sets the real HTTP status on this instance |
-| `type="HEADER"` Authorization mapping | designed; **unverified on 11.6** | confirm the inbound Authorization header reaches the `.p` param |
+| `useReturnValue` status mapping | **verified on 11.6** (2026-07-02) — `RETURN "401"` surfaced as a real HTTP 401 during auth bring-up; `RETURN "200"` on a successful lookup | — |
+| `type="HEADER"` Authorization mapping | **verified on 11.6** (2026-07-02) — inbound `Authorization` header reaches the `.p` `authHeader` param and authorizes end-to-end | — |
 | Auto-reconnect on broker restart | code in place; **unverified** | §6 + pin error code |
 | Disconnect error-code precision | documented family; **not observed** | §6 capture |
 | Latency vs **real** MPI schema | **not measured** (synthetic = floor only) | §7 |
@@ -175,21 +180,23 @@ test DB per `docs/test-db-setup.md`, connect it as `-ld qaddb`, and diff the
 
 ### REST-adapter model vs WebHandler — what changed, and the residual risks
 
-The rework preserves the contract, but two conveniences that were trivial in `WebHandler` become
-**configuration + 11.6-behavior** dependencies in the classic REST-adapter model — both must be
-confirmed on the box:
+The rework preserves the contract via two conveniences that were trivial in `WebHandler` but become
+**configuration + 11.6-behavior** dependencies in the classic REST-adapter model. **Both were
+confirmed on a live 11.6 box on 2026-07-02** — the fallbacks below are retained for the record but
+were not needed:
 
-- **HTTP status from the `.p`** — met via `useReturnValue="true"` + `RETURN "<code>"`. This is the
-  biggest risk. If, on this exact 11.6 instance, the adapter does **not** map the return value to
-  the status line (some configurations only surface a fixed 200 unless the WRITE handler is used),
-  the fallback is to keep the status in the body (`Error.code` / an explicit `status` field) and
-  have the SaaS read it — a contract addition, raised as a cross-repo request, NOT a silent change.
-  Confirm first; the `RETURN "<code>"` path is expected to work.
-- **Authorization header → param** — met via `type="HEADER"` mapping. Confirmed by Progress docs
-  that the **classic** REST adapter can map a request header to a CHARACTER param (unlike PASOE Web
-  handlers, which cannot read `Authorization`). If a given instance still strips it, the fallback is
-  an `X-API-Key` header (also mappable) — but that diverges from the contract's `BearerAuth`, so it
-  too would be a cross-repo contract note, not a unilateral change.
+- **HTTP status from the `.p`** — met via `useReturnValue="true"` + `RETURN "<code>"`. **Confirmed:**
+  `RETURN "401"` surfaced as a real HTTP 401 during auth bring-up and `RETURN "200"` on a successful
+  lookup, so the adapter maps the return value to the status line on this instance. (Retained
+  fallback, unused: if an instance ever surfaces only a fixed 200, keep the status in the body —
+  `Error.code` / an explicit `status` field — and have the SaaS read it; that would be a contract
+  addition raised as a cross-repo request, NOT a silent change.)
+- **Authorization header → param** — met via `type="HEADER"` mapping (`authHeader` ←
+  `${http.header['Authorization']}`). **Confirmed:** the inbound `Authorization` header reaches the
+  `.p` param and authorizes end-to-end; the classic REST adapter maps the header to a CHARACTER param
+  (unlike PASOE Web handlers, which cannot read `Authorization`). (Retained fallback, unused: if an
+  instance strips it, an `X-API-Key` header is also mappable — but that diverges from the contract's
+  `BearerAuth`, so it too would be a cross-repo contract note, not a unilateral change.)
 
 Everything else (JSON shape/field names, reconnect/503 body, wire formats) is identical to the
 WebHandler version — only the entry seam moved from a class to a mapped `.p`.
