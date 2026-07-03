@@ -13,6 +13,9 @@
                     - SOL-119: ErrorClassifier connection-state table (1006
                       etc. -> retryable 503), wire sanitization (no db/class/
                       OE-code leakage), RawDetail never serialized.
+                    - SOL-119 bounded connect: the pure param-parsing seams
+                      (ExtractBrokerEndpoint, HasParameter,
+                      NormalizeParamFileText) behind the probe + -ct design.
 
     DB-bound behavior (the BOM explosion against pt_mstr/ps_mstr/ptp_det, the
     live reconnect, and latency) CANNOT be unit-tested off a connected MFG/PRO
@@ -222,6 +225,100 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
         Assert:IsTrue(INDEX(cDetail, "AppError":U) > 0).
         Assert:IsTrue(INDEX(cDetail, "first message":U) > 0).
         Assert:IsTrue(INDEX(cDetail, "1006":U) > 0).
+    END METHOD.
+
+    /* Live-pinned on the 2026-07-02 fault injection: the downed broker
+       surfaced OE 1432 "Could not connect to server for database mfgpro,
+       errno 0." -- must classify ERP_UNAVAILABLE / 503 / retryable. */
+    @Test.
+    METHOD PUBLIC VOID Classifier_maps_live_pinned_1432_to_unavailable():
+        DEFINE VARIABLE oRaw AS AppError       NO-UNDO.
+        DEFINE VARIABLE oErr AS ConnectorError NO-UNDO.
+
+        oRaw = NEW AppError("Could not connect to server for database mfgpro, errno 0.":U, 1432).
+        oErr = ErrorClassifier:ClassifyConnectionState(oRaw).
+
+        Assert:IsTrue(VALID-OBJECT(oErr)).
+        Assert:Equals("ERP_UNAVAILABLE":U,  oErr:Code).
+        Assert:Equals("ERP_CONNECTIVITY":U, oErr:Category).
+        Assert:Equals(503,                  oErr:HttpStatus).
+        Assert:IsTrue(oErr:Retryable).
+    END METHOD.
+
+    /* ---- SOL-119 bounded-connect: pure param-parsing seams ---- */
+
+    /* The probe endpoint is derived from the CONFIGURED connect params
+       (-H/-S), not from a duplicate setting. */
+    @Test.
+    METHOD PUBLIC VOID ExtractBrokerEndpoint_parses_H_and_S_tokens():
+        DEFINE VARIABLE cHost AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE cSvc  AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE lOk   AS LOGICAL   NO-UNDO.
+
+        lOk = DatabaseConnection:ExtractBrokerEndpoint(
+            "-db mfgpro -ld mfgpro -H pensacola.home -S 2501":U,
+            OUTPUT cHost, OUTPUT cSvc).
+        Assert:IsTrue(lOk).
+        Assert:Equals("pensacola.home":U, cHost).
+        Assert:Equals("2501":U, cSvc).
+
+        /* extra whitespace / tabs / service-by-name still parse */
+        lOk = DatabaseConnection:ExtractBrokerEndpoint(
+            "  -H   dbhost01" + CHR(9) + "-S mfgpro-broker  -N TCP":U,
+            OUTPUT cHost, OUTPUT cSvc).
+        Assert:IsTrue(lOk).
+        Assert:Equals("dbhost01":U, cHost).
+        Assert:Equals("mfgpro-broker":U, cSvc).
+    END METHOD.
+
+    @Test.
+    METHOD PUBLIC VOID ExtractBrokerEndpoint_unparseable_returns_false():
+        DEFINE VARIABLE cHost AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE cSvc  AS CHARACTER NO-UNDO.
+
+        /* shared-memory-style params: no -H/-S -> not probeable */
+        Assert:IsFalse(DatabaseConnection:ExtractBrokerEndpoint(
+            "-db /data/mfgpro -ld mfgpro -1":U, OUTPUT cHost, OUTPUT cSvc)).
+        /* -H without -S -> incomplete -> not probeable */
+        Assert:IsFalse(DatabaseConnection:ExtractBrokerEndpoint(
+            "-db mfgpro -H dbhost01":U, OUTPUT cHost, OUTPUT cSvc)).
+        Assert:IsFalse(DatabaseConnection:ExtractBrokerEndpoint(
+            "":U, OUTPUT cHost, OUTPUT cSvc)).
+    END METHOD.
+
+    /* -ct is appended to the CONNECT only when absent from the effective
+       params; exact-token match so "-ct" never false-positives. */
+    @Test.
+    METHOD PUBLIC VOID HasParameter_is_exact_token_match():
+        Assert:IsTrue(DatabaseConnection:HasParameter(
+            "-db mfgpro -H h -S 2501 -ct 2":U, "-ct":U)).
+        Assert:IsFalse(DatabaseConnection:HasParameter(
+            "-db mfgpro -H h -S 2501":U, "-ct":U)).
+        /* no substring collisions: -cts / x-ct are different tokens */
+        Assert:IsFalse(DatabaseConnection:HasParameter(
+            "-db mfgpro -cts 5":U, "-ct":U)).
+        Assert:IsFalse(DatabaseConnection:HasParameter(STRING(?), "-ct":U)).
+    END METHOD.
+
+    /* .pf flattening: newline handling + #-comment stripping, so -H/-S/-ct
+       inside a referenced .pf participate in probe/bounding decisions. */
+    @Test.
+    METHOD PUBLIC VOID NormalizeParamFileText_strips_comments_and_joins_lines():
+        DEFINE VARIABLE cOut  AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE cHost AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE cSvc  AS CHARACTER NO-UNDO.
+
+        cOut = DatabaseConnection:NormalizeParamFileText(
+            "# live broker" + CHR(10) +
+            "-db mfgpro -ld mfgpro" + CHR(13) + CHR(10) +
+            "-H pensacola.home  # db host" + CHR(10) +
+            "-S 2501":U).
+
+        Assert:IsTrue(INDEX(cOut, "# ":U) = 0).
+        Assert:IsTrue(DatabaseConnection:ExtractBrokerEndpoint(
+            cOut, OUTPUT cHost, OUTPUT cSvc)).
+        Assert:Equals("pensacola.home":U, cHost).
+        Assert:Equals("2501":U, cSvc).
     END METHOD.
 
     /* The .p entry seam returns this string to the REST adapter

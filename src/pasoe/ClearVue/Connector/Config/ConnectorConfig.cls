@@ -65,6 +65,24 @@ CLASS ClearVue.Connector.Config.ConnectorConfig:
             RETURN ResolveIntValue("CLEARVUE_RECONNECT_CEILING_MS":U, 6000).
         END GET.
 
+    /* ---- SOL-119 bounded-connect controls (resilience-and-errors.md) ---- */
+
+    /* Socket pre-probe timeout in ms (-clientConnectTimeout on the probe
+       socket; Progress KB 000051142). On OE 11 the effective wait can be
+       ~2x this value (two attempts); single attempt on OE 12. */
+    DEFINE PUBLIC PROPERTY ProbeTimeoutMs AS INTEGER NO-UNDO
+        GET():
+            RETURN ResolveIntValue("CLEARVUE_PROBE_TIMEOUT_MS":U, 2000).
+        END GET.
+
+    /* Connection Retry Attempts (-ct) appended to the DB CONNECT unless the
+       operator's params/.pf already set -ct. The OpenEdge default is ~50
+       tries (~103s observed live against a downed broker); 1 = one try. */
+    DEFINE PUBLIC PROPERTY ConnectRetryTries AS INTEGER NO-UNDO
+        GET():
+            RETURN ResolveIntValue("CLEARVUE_CONNECT_CT":U, 1).
+        END GET.
+
     /* The enforced bearer secret. NO default -- fail closed if unset. */
     METHOD PUBLIC CHARACTER GetApiKey():
         RETURN ResolveValue("CLEARVUE_CONNECTOR_API_KEY":U, "":U).

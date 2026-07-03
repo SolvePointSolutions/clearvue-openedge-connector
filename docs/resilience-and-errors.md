@@ -21,16 +21,19 @@ budget. An error is returned only when reconnection genuinely fails.
   (`CONNECTED("qaddb")`). If not, reconnect before querying.
 - **Mid-query drop.** If a query fails due to a connection-failure condition, treat it as a
   disconnect: reconnect and re-run the query **once**.
-- **Bounded retry + backoff.** Attempt reconnect up to *N* times with a short backoff,
-  staying inside the connector's total response budget (**≤7s**; reconnect ceiling **~6s**) —
-  see the timeout ladder below. Do **not** spin indefinitely.
+- **Bounded PROBE + at most ONE CONNECT** (SOL-119 rework — see §1b for why blind CONNECT
+  retries blew the budget by minutes). Up to *N* bounded socket probes of the broker with a
+  short backoff, ceiling-checked between attempts (reconnect ceiling **~6s**); a DB-level
+  CONNECT (itself `-ct`-bounded) is issued **at most once**, and only after a probe answered.
 - **Clean stale state.** If the connection is half-dead, `DISCONNECT` before re-`CONNECT`.
 - **Outcome → contract:**
   - reconnect succeeds → normal 200 response (the bounce was invisible).
-  - reconnect fails within budget → `503 ERP_DISCONNECTED`, `retryable: true`,
-    `retryAfterSeconds`, with a safe `diagnostic`.
-  - host/broker unreachable at all → `503 ERP_UNAVAILABLE`, `retryable: true`.
-  - reconnect ate the whole budget → `504 ERP_TIMEOUT`, `retryable: true`.
+  - broker never answers a bounded probe → `503 ERP_UNAVAILABLE`, `retryable: true`
+    (we *know* the upstream is unreachable — down/mid-restart/blocked).
+  - broker answered but the single CONNECT failed (mid-shutdown broker, refused login) →
+    `503 ERP_DISCONNECTED`, `retryable: true`, `retryAfterSeconds`, safe `diagnostic`.
+  - `504 ERP_TIMEOUT` is **reserved for a genuinely slow-but-alive upstream** (query-duration
+    budget); the reconnect path no longer emits it — a down broker is `ERP_UNAVAILABLE`.
 
 ### Timeout ladder (must hold, with margin)
 
@@ -68,6 +71,60 @@ All values configuration-driven so the field can tune without a rebuild. Invaria
 
 ---
 
+## 1b. Bounded connect (SOL-119 live-proof rework)
+
+**The live measurement that forced this design:** the ABL database `CONNECT` statement is
+**synchronous** and by default makes **~50 OS-level tries** before returning failure. On
+pensacola.home (2026-07-02 fault injection) a single CONNECT against the downed `mfgpro`
+broker blocked **103 seconds** before failing with OE 1432; three loop attempts produced a
+**~3-minute** 503 instead of the ~6s budget. The reconnect ceiling is only checkable
+*between* attempts — it cannot preempt a CONNECT in flight.
+
+Two **verified** Progress mechanisms bound the wait (do not invent others):
+
+1. **Socket pre-probe with `-clientConnectTimeout <ms>`** on the ABL Socket `CONNECT()`
+   method — supported for non-SSL sockets since **OpenEdge 11.3** (11.6-safe), SSL since
+   10.2B07/11.2. Caveat: **on OE 11 two connection attempts are made**, so the effective
+   wait can be ~2× the configured value; **OE 12 makes a single attempt**. Source:
+   Progress KB 000051142 ("How to specify a socket connect timeout for the CONNECT method").
+2. **`-ct <n>` (Connection Retry Attempts) on the DB CONNECT** — supported 10.2B/11.x+.
+   Without it the CONNECT makes ~50 tries; the connector appends `-ct 1` (config
+   `CLEARVUE_CONNECT_CT`) unless the operator's params/.pf already set `-ct`. Source:
+   Progress KB "How to reduce the time for a CONNECT statement to return signaling that a
+   database is unavailable".
+
+**Flow (`DatabaseConnection:EnsureConnected()`):** derive the broker host:port from the
+configured connect params (inline `-H`/`-S` or inside the referenced `.pf` — reused, not
+duplicated); loop up to `CLEARVUE_RECONNECT_MAX_ATTEMPTS` **bounded probes**
+(`CLEARVUE_PROBE_TIMEOUT_MS`, default 2000 ms) with backoff, ceiling-checked between
+attempts; on the **first successful probe issue exactly ONE `-ct`-bounded CONNECT** — there
+is **no retry loop of blind CONNECTs**. Probes never answer → `ERP_UNAVAILABLE`. Probe
+answered but CONNECT failed → `ERP_DISCONNECTED`. Endpoint not derivable (e.g.
+shared-memory params, no `-H`/`-S`) → skip the probe, single `-ct`-bounded CONNECT.
+
+### Worst-case wall time for the 503 path (defaults: 3 attempts, 2s probe, 750ms backoff, 6s ceiling, `-ct 1`)
+
+| Scenario | Wall time to the 503 | Notes |
+|---|---|---|
+| Broker port closed (typical stopped DB) | **~1.5–2s** | probes fail fast (TCP refused) → `ERP_UNAVAILABLE` |
+| Host unreachable / SYN black-hole | **~7.5s** (OE 12) / **~9s** (OE 11, probe doubling) | probes eat the full timeout; ceiling stops the loop → `ERP_UNAVAILABLE` |
+| Broker accepts TCP but hangs the DB connect (mid-`proshut`) | probe (fast) + **one** CONNECT try — **~2s observed live, but NOT hard-bounded** | `-ct 1` caps tries, not wall-clock; this is the honest residual corner. If it recurs chronically, lower the agent-side HttpClient timeout is the backstop (ladder above). |
+| DB back up (recovered bounce) | probe (~ms) + CONNECT (~1–2s) → **200** | the bounce is invisible |
+
+> **Honesty note:** the budget is *near*-hard, not hard. Every probe is wall-clock-bounded,
+> but the single post-probe CONNECT is bounded in *tries* (`-ct 1`), not in seconds. Progress
+> provides no wall-clock timeout for the DB CONNECT statement itself; the agent/gateway
+> timeout layers above remain the final backstop for that corner.
+
+> **Observed runtime note (2026-07-02):** pensacola.home runs **OpenEdge 12.8** (MSAS agent
+> log). **Ruling (Rod, 2026-07-02):** no 11.6 environment is available right now; develop and
+> prove on 12.8, assume Progress backwards compatibility, and keep all connector code
+> 11.6-language-safe per CONTRIBUTING (the mechanisms above are supported on both, with the
+> OE 11 probe-doubling caveat). Downversion support will be proven on the client's 11.6 test
+> site when available — until then 11.6 rows in the status table stay **[LIVE-ONLY]**.
+
+---
+
 ## 1a. Connection-state classification (SOL-119)
 
 A DB-down fault does not always arrive through `EnsureConnected()`. Because the query
@@ -82,7 +139,8 @@ Two defenses (both in place):
 
 1. **Pre-flight ordering.** The REST entry seam calls `DatabaseConnection:EnsureConnected()`
    **before** instantiating any schema-referencing query class, so a stopped DB takes the
-   structured reconnect path (`503 ERP_DISCONNECTED`) instead of raising 1006 at r-code load.
+   structured bounded-connect path (§1b → `503 ERP_UNAVAILABLE`/`ERP_DISCONNECTED`) instead
+   of raising 1006 at r-code load.
 2. **Classification before the catch-all.** `ClearVue.Connector.Web.ErrorClassifier` is the
    single, table-driven "is this a known transient upstream state?" test. Every seam's
    generic `CATCH` classifies first; only a genuinely unknown fault falls through to the
@@ -97,7 +155,7 @@ Two defenses (both in place):
 | 793 | lost connection to server | `ERP_DISCONNECTED` | ERP_CONNECTIVITY | 503 | true | (same) |
 | 1423 | no server for database (broker down/restarting) | `ERP_UNAVAILABLE` | ERP_CONNECTIVITY | 503 | true | "upstream ERP is temporarily unavailable; retry shortly" |
 | 748 | server/system out of resources (connect refused) | `ERP_UNAVAILABLE` | ERP_CONNECTIVITY | 503 | true | (same) |
-| 1432 | cannot reach a server (network/firewall) | `ERP_UNAVAILABLE` | ERP_CONNECTIVITY | 503 | true | (same) |
+| 1432 | cannot reach a server (network/firewall) — **live-pinned 2026-07-02** ("Could not connect to server for database …, errno 0") | `ERP_UNAVAILABLE` | ERP_CONNECTIVITY | 503 | true | (same) |
 | *anything else* | unknown fault | `INTERNAL` (`ERP_QUERY_ERROR` at the query seam) | INTERNAL | 500 (502) | false | "unexpected connector fault; quote the correlationId to support" |
 
 The classifier walks **all** messages on the raw error (wrapped errors bury the number

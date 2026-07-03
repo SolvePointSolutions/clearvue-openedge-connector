@@ -27,7 +27,9 @@
       748      | server/system has no more resources (connect   | ERP_UNAVAILABLE
                | refused for resources)                         |
       1432     | cannot reach a server (network/firewall / no   | ERP_UNAVAILABLE
-               | more servers)                                  |
+               | more servers). LIVE-PINNED 2026-07-02: downed  |
+               | broker raised "Could not connect to server for |
+               | database mfgpro, errno 0. (1432)"              |
 
       Both contract codes render category ERP_CONNECTIVITY, HTTP 503,
       retryable:true (see ConnectorError factories). Everything NOT in the

@@ -15,6 +15,10 @@
 
     The DB reachability probe lives in DatabaseConnection (one responsibility);
     this .p only composes the 3-field body by hand via the JSON Object Model.
+    SOL-119: ProbeReachable() now uses the bounded SOCKET probe of the broker
+    (~ms..2s) rather than a full DB CONNECT, so /health stays fast while the
+    ERP bounces; erpReachable therefore means "the broker answers", not "a
+    DB-level login succeeded".
   ----------------------------------------------------------------------*/
 
 BLOCK-LEVEL ON ERROR UNDO, THROW.

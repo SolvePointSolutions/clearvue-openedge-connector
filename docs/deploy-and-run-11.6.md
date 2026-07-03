@@ -9,6 +9,14 @@ PASOE box against QAD MFG/PRO, and how to prove the two genuinely-open items
 > below is the deploy recipe; the steps that *require* the live environment to
 > verify are flagged **[LIVE-ONLY]**. No results are faked.
 
+> **Observed runtime (2026-07-02, SOL-119 fault injection):** pensacola.home runs
+> **OpenEdge 12.8** ("MSAS Agent Starting Up -- Progress OpenEdge Release 12.8"), not 11.6.
+> **Ruling (Rod, 2026-07-02):** no 11.6 environment is available right now — develop and prove
+> on 12.8 and assume Progress backwards compatibility, but all connector code stays
+> **11.6-language-safe** per CONTRIBUTING; nothing in this repo may assume a 12.x-only
+> ABL feature without a version check. Downversion support gets proven on the client's 11.6
+> test site when it becomes available; those checks remain **[LIVE-ONLY]** until then.
+
 ## 0. Layout
 
 ```
@@ -17,9 +25,11 @@ src/pasoe/ClearVue/Connector/
             GetProductStructure.p          # GET /product-structure (REST-adapter ENTRY SEAM)
   Config/   ConnectorConfig.cls            # domain, db name, connect params, api key (env-sourced)
   Web/      ConnectorError.cls             # contract Error body + code/category/status mapping
-  Data/     DatabaseConnection.cls         # EnsureConnected() -- persistent connect + reconnect
+            ErrorClassifier.cls            # SOL-119: connection-state classification table
+  Logging/  ConnectorLog.cls               # SOL-119: server-side raw-diagnostic log (CVERR)
+  Data/     DatabaseConnection.cls         # EnsureConnected() -- bounded probe + connect (SOL-119)
             SessionActivate.p              # session-activate hook (persistent connection)
-  Query/    ProductStructureQuery.cls      # ported xx-bmpsrp.p BOM explosion (clean re-impl)
+  Queries/  ProductStructureQuery.cls      # ported xx-bmpsrp.p BOM explosion (clean re-impl)
   Security/ ApiKeyAuthenticator.cls        # Authorization: Bearer enforcement (header value)
   Json/     JsonFormat.cls                 # invariant decimals, ISO dates, empty->null
             ProductStructureJsonComposer.cls # hand-composed StructureComponent[] -> LONGCHAR
@@ -96,6 +106,16 @@ The entry points are mapped `.p`'s, not handler classes:
 2. **Session-activate.** Merge `config/pasoe-instance.properties.example` into the instance's
    `conf/openedge.properties` (`srvrActivateProc=ClearVue/Connector/Data/SessionActivate.p`) and
    add the compiled connector root to the ABL app PROPATH.
+3. **Do NOT put the ERP DB in the agent startup parameters** (`agentStartupParam` /
+   the ABL app's session startup `-db …`). **Observed live (2026-07-02):** with `mfgpro`
+   in the agent startup params and the DB down, the **whole MSAS agent failed to boot**
+   (status **-1005**, error **5479**) — the connector then can't even serve `/health` or a
+   structured 503 while the ERP bounces, defeating the design goal. The connection is owned
+   exclusively by `DatabaseConnection` (connect at session-activate via
+   `SessionActivate.p`, self-healing per request via `EnsureConnected()` — both handle
+   connect-from-scratch). One requirement remains: the runtime `-ld` in the `.pf`
+   (`CLEARVUE_DB_LOGICAL_NAME`) must match the logical name the r-code was **compiled**
+   against, or schema references fail at r-code load.
 
 Restart the instance. Base URL follows the contract:
 `http://<host>:<port>/<webapp>/clearvue/erp/v1`.
@@ -121,21 +141,33 @@ curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
 # from pt_mstr (genuinely not in the ERP) are the other paths.
 ```
 
-## 6. [LIVE-ONLY] Prove auto-reconnect
+## 6. [LIVE-ONLY] Prove auto-reconnect (bounded — SOL-119 rework)
+
+> First live run (2026-07-02) proved classification/sanitization end-to-end but took
+> **~3 minutes** to 503: the default DB CONNECT makes ~50 OS-level tries (~103s each cycle
+> observed, error 1432). The bounded probe+`-ct` design replaces that — re-prove with the
+> expected timings below. See `resilience-and-errors.md` §1b.
 
 1. Issue a successful `/product-structure` call (warms the persistent connection).
 2. Bounce the MFG/PRO broker mid-session (`proshut` / restart the DB).
 3. Immediately re-issue the same call.
-   - **Expected:** `EnsureConnected()` sees `CONNECTED("qaddb")=false`, reconnects
-     within budget, and returns **200** (the bounce is invisible).
-   - If the broker stays down past the reconnect ceiling (~6s): **503**
-     `ERP_DISCONNECTED`, `retryable:true`.
-4. **Pin the exact OE connection-failure error code.** While the broker is down,
-   capture `ERROR-STATUS:GET-NUMBER(1)` from the failed `CONNECT` (the agent log /
-   a temporary trace). The documented family is `1423` (no server for database),
-   `1422`/`748`/`793` (connection loss). **Add the observed code to
-   `DatabaseConnection:IsDisconnectError()`** so mid-query retry triggers only on a
-   real disconnect. **RECORD THE OBSERVED CODE HERE:** `__TBD on spike__`.
+   - **DB back up:** `EnsureConnected()` probes (fast), reconnects with ONE `-ct 1`
+     CONNECT, returns **200** in ~1–2s (the bounce is invisible).
+   - **Broker still down (port closed):** **503 `ERP_UNAVAILABLE`**, `retryable:true`,
+     in **~1.5–2s** (probes fail fast). Worst case ~7.5–9s when the host black-holes the
+     SYN (full probe timeouts + ceiling). **NOT minutes.**
+   - **Broker mid-shutdown (accepts TCP, hangs the DB connect):** probe passes, the single
+     `-ct 1` CONNECT fails after one OS try (~2s observed) → **503 `ERP_DISCONNECTED`** —
+     bounded in tries, not wall-clock (the documented residual corner).
+   - Every 503 body: sanitized `message`/`diagnostic` (no db name / class / OE code) + a
+     `correlationId`; grep the agent log for `CLEARVUE-CONNECTOR correlationId=<id>` to get
+     the raw detail (host:port, probe counts, OE error).
+4. **Pin any additional OE connection-failure error code.** `1432` was observed and is
+   live-pinned in the `ErrorClassifier` base table (with `1006`, `1422`, `1423`, `748`,
+   `793`). If a different code appears in the agent log, pin it WITHOUT a rebuild via
+   `CLEARVUE_CONNECTION_STATE_ERROR_CODES=<code>=ERP_UNAVAILABLE` (or `=ERP_DISCONNECTED`),
+   then fold it into the base table. **OBSERVED CODES:** `1432` (2026-07-02, downed broker);
+   agent-boot failure with DB in startup params: `5479` / status `-1005` (see §4.3).
 
 ## 7. [LIVE-ONLY] Measure latency
 
@@ -173,8 +205,8 @@ test DB per `docs/test-db-setup.md`, connect it as `-ld qaddb`, and diff the
 | REST `.paar` build + URI mapping | mapping authored (`resourceModel.example.xml`); **not packaged** | build/publish the REST service on the box (§4) |
 | `useReturnValue` status mapping | **verified on 11.6** (2026-07-02) — `RETURN "401"` surfaced as a real HTTP 401 during auth bring-up; `RETURN "200"` on a successful lookup | — |
 | `type="HEADER"` Authorization mapping | **verified on 11.6** (2026-07-02) — inbound `Authorization` header reaches the `.p` `authHeader` param and authorizes end-to-end | — |
-| Auto-reconnect on broker restart | code in place; **unverified** | §6 + pin error code |
-| Disconnect error-code precision | documented family; **not observed** | §6 capture |
+| Auto-reconnect on broker restart | classification/sanitization **live-proven 2026-07-02** but took ~3 min; bounded probe+`-ct` rework (SOL-119) **needs re-proof** | §6 re-run; expect seconds, not minutes |
+| Disconnect error-code precision | `1432` **observed live 2026-07-02** (downed broker) + boot-failure `5479`/`-1005`; pinned in `ErrorClassifier` | §6 capture any additional codes |
 | Latency vs **real** MPI schema | **not measured** (synthetic = floor only) | §7 |
 | Read-only grants confirmed | feasibility TODO | MPI to provision |
 
