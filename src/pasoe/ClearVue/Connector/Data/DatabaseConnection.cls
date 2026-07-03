@@ -283,13 +283,13 @@ CLASS ClearVue.Connector.Data.DatabaseConnection:
        references. Nested -pf inside a .pf is not chased (keep .pf flat). */
     METHOD PRIVATE CHARACTER EffectiveParamsText():
         DEFINE VARIABLE cInline AS CHARACTER NO-UNDO.
-        DEFINE VARIABLE cAll    AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE cFlat   AS CHARACTER NO-UNDO.
         DEFINE VARIABLE cTok    AS CHARACTER NO-UNDO.
         DEFINE VARIABLE iIdx    AS INTEGER   NO-UNDO.
         DEFINE VARIABLE lNextIsPf AS LOGICAL NO-UNDO.
 
         cInline = (IF oConfig:ConnectParams = ? THEN "":U ELSE oConfig:ConnectParams).
-        cAll    = cInline.
+        cFlat   = cInline.
 
         cInline = REPLACE(REPLACE(cInline, CHR(9), " ":U), CHR(10), " ":U).
         DO iIdx = 1 TO NUM-ENTRIES(cInline, " ":U):
@@ -297,14 +297,14 @@ CLASS ClearVue.Connector.Data.DatabaseConnection:
             IF cTok = "":U THEN NEXT.
             IF lNextIsPf THEN
             DO:
-                cAll = cAll + " ":U + ReadParamFileText(cTok).
+                cFlat = cFlat + " ":U + ReadParamFileText(cTok).
                 lNextIsPf = FALSE.
                 NEXT.
             END.
             IF cTok = "-pf":U THEN
                 lNextIsPf = TRUE.
         END.
-        RETURN cAll.
+        RETURN cFlat.
     END METHOD.
 
     /* Read a .pf and return its content flattened to one space-separated

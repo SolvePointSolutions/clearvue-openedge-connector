@@ -24,6 +24,14 @@ Thanks for your interest in the ClearVue OpenEdge Connector.
     (`STRING(?)`, `DATE(?)`, `INTEGER(?)`, …) so the argument's datatype is explicit. *(A bare `?`
     in a comparison (`x <> ?`) or assigned to a typed target is a different, fine idiom — this rule
     is specifically about `?` passed as a call argument.)*
+  - **Identifiers that case-insensitively spell a reserved ABL keyword** — ABL identifiers are
+    case-insensitive, and a Hungarian type prefix can accidentally complete a keyword: `cAll`
+    IS `CALL` to the compiler (live-observed compile failure, 2026-07-02), and `authorization`
+    is the reserved `AUTHORIZATION` keyword (see the `authHeader` note in
+    `docs/deploy-and-run-11.6.md`). Before naming a variable/parameter, check the **whole
+    identifier** against the ABL reserved-keyword list, remembering the prefix letter counts
+    as part of the word; prefer a more specific name (`cFlat`, `authHeader`) over a colliding
+    one.
   - Newer `Progress.Lang.*` / `OpenEdge.Core.*` / JSON-Object-Model members, constructors, or
     overloads added after 11.6; the `SERIALIZABLE` class attribute; later string-interpolation /
     pipe / generic-collection syntax. When in doubt, verify the member's introduced-version
