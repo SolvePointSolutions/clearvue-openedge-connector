@@ -10,6 +10,9 @@
                     - JsonFormat wire rules (invariant decimals at scale, ISO
                       dates, empty/? -> null, required-string never null).
                     - DatabaseConnection:IsDisconnectError classification.
+                    - SOL-119: ErrorClassifier connection-state table (1006
+                      etc. -> retryable 503), wire sanitization (no db/class/
+                      OE-code leakage), RawDetail never serialized.
 
     DB-bound behavior (the BOM explosion against pt_mstr/ps_mstr/ptp_det, the
     live reconnect, and latency) CANNOT be unit-tested off a connected MFG/PRO
@@ -23,6 +26,7 @@ USING Progress.Lang.*.
 USING Progress.Json.ObjectModel.JsonObject.
 USING OpenEdge.Core.Assert.
 USING ClearVue.Connector.Web.ConnectorError.
+USING ClearVue.Connector.Web.ErrorClassifier.
 USING ClearVue.Connector.Json.JsonFormat.
 USING ClearVue.Connector.Data.DatabaseConnection.
 
@@ -119,9 +123,105 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
     METHOD PUBLIC VOID DisconnectClassifier_recognizes_documented_codes():
         Assert:IsTrue(DatabaseConnection:IsDisconnectError(1423)).
         Assert:IsTrue(DatabaseConnection:IsDisconnectError(1422)).
+        /* SOL-119: 1006 (db not connected) is in the shared table too */
+        Assert:IsTrue(DatabaseConnection:IsDisconnectError(1006)).
         Assert:IsFalse(DatabaseConnection:IsDisconnectError(0)).
         /* a random app error must NOT be treated as a disconnect */
         Assert:IsFalse(DatabaseConnection:IsDisconnectError(132)).
+    END METHOD.
+
+    /* ---- SOL-119: connection-state classification + sanitization ---- */
+
+    /* Rod's fault-injection case: with the mfgpro DB stopped, the raw fault
+       is OE 1006 "Database mfgpro not connected." -- it must classify as a
+       retryable 503 ERP_CONNECTIVITY error, with NO db name / class name /
+       OE code in any wire field, and the raw text preserved server-side. */
+    @Test.
+    METHOD PUBLIC VOID Classifier_maps_db_not_connected_1006_to_retryable_503():
+        DEFINE VARIABLE oRaw AS AppError       NO-UNDO.
+        DEFINE VARIABLE oErr AS ConnectorError NO-UNDO.
+        DEFINE VARIABLE lcBody AS LONGCHAR     NO-UNDO.
+
+        oRaw = NEW AppError("ClearVue.Connector.Queries.ProductStructureQuery Database mfgpro not connected.":U, 1006).
+        oErr = ErrorClassifier:ClassifyConnectionState(oRaw).
+
+        Assert:IsTrue(VALID-OBJECT(oErr)).
+        Assert:Equals("ERP_DISCONNECTED":U, oErr:Code).
+        Assert:Equals("ERP_CONNECTIVITY":U, oErr:Category).
+        Assert:Equals(503,                  oErr:HttpStatus).
+        Assert:IsTrue(oErr:Retryable).
+
+        /* sanitized wire body: no db name, no class name, no OE error code */
+        lcBody = oErr:ToJsonString().
+        Assert:IsTrue(INDEX(STRING(lcBody), "mfgpro":U) = 0).
+        Assert:IsTrue(INDEX(STRING(lcBody), "ProductStructureQuery":U) = 0).
+        Assert:IsTrue(INDEX(STRING(lcBody), "1006":U) = 0).
+
+        /* raw detail preserved for the server-side log */
+        Assert:IsTrue(INDEX(oErr:RawDetail, "mfgpro":U) > 0).
+        Assert:IsTrue(INDEX(oErr:RawDetail, "1006":U) > 0).
+    END METHOD.
+
+    /* Broker-down family maps to ERP_UNAVAILABLE; the classifier must walk
+       ALL messages, not just the first (wrapped errors bury the number). */
+    @Test.
+    METHOD PUBLIC VOID Classifier_walks_all_messages_and_maps_broker_down():
+        DEFINE VARIABLE oRaw AS AppError       NO-UNDO.
+        DEFINE VARIABLE oErr AS ConnectorError NO-UNDO.
+
+        oRaw = NEW AppError("outer wrapper text":U, 0).
+        oRaw:AddMessage("There is no server for database mfgpro.":U, 1423).
+        oErr = ErrorClassifier:ClassifyConnectionState(oRaw).
+
+        Assert:IsTrue(VALID-OBJECT(oErr)).
+        Assert:Equals("ERP_UNAVAILABLE":U,  oErr:Code).
+        Assert:Equals("ERP_CONNECTIVITY":U, oErr:Category).
+        Assert:Equals(503,                  oErr:HttpStatus).
+        Assert:IsTrue(oErr:Retryable).
+    END METHOD.
+
+    /* A genuinely unknown fault must NOT classify -- the seams then apply
+       their own non-retryable fallback (INTERNAL / ERP_QUERY_ERROR). */
+    @Test.
+    METHOD PUBLIC VOID Classifier_leaves_unknown_faults_unclassified():
+        DEFINE VARIABLE oRaw AS AppError       NO-UNDO.
+        DEFINE VARIABLE oErr AS ConnectorError NO-UNDO.
+
+        oRaw = NEW AppError("some application bug":U, 132).
+        oErr = ErrorClassifier:ClassifyConnectionState(oRaw).
+        Assert:IsFalse(VALID-OBJECT(oErr)).
+    END METHOD.
+
+    /* RawDetail is the server-side-only channel: whatever is stored there
+       must never appear in the serialized contract Error body. */
+    @Test.
+    METHOD PUBLIC VOID RawDetail_is_never_serialized_to_the_wire():
+        DEFINE VARIABLE oErr   AS ConnectorError NO-UNDO.
+        DEFINE VARIABLE lcBody AS LONGCHAR       NO-UNDO.
+
+        oErr = ConnectorError:ErpDisconnected("sanitized reason":U).
+        oErr:RawDetail = "RAW-TOPOLOGY client/server connection to mfgpro dropped (1006)":U.
+        lcBody = oErr:ToJsonString().
+
+        Assert:IsTrue(INDEX(STRING(lcBody), "RAW-TOPOLOGY":U) = 0).
+        Assert:IsTrue(INDEX(STRING(lcBody), "mfgpro":U) = 0).
+        Assert:IsTrue(INDEX(STRING(lcBody), "sanitized reason":U) > 0).
+    END METHOD.
+
+    /* RawDetailOf composes type + every message with its OE number -- the
+       support-facing log payload. */
+    @Test.
+    METHOD PUBLIC VOID RawDetailOf_captures_type_and_all_numbered_messages():
+        DEFINE VARIABLE oRaw    AS AppError  NO-UNDO.
+        DEFINE VARIABLE cDetail AS CHARACTER NO-UNDO.
+
+        oRaw = NEW AppError("first message":U, 0).
+        oRaw:AddMessage("Database mfgpro not connected.":U, 1006).
+        cDetail = ErrorClassifier:RawDetailOf(oRaw).
+
+        Assert:IsTrue(INDEX(cDetail, "AppError":U) > 0).
+        Assert:IsTrue(INDEX(cDetail, "first message":U) > 0).
+        Assert:IsTrue(INDEX(cDetail, "1006":U) > 0).
     END METHOD.
 
     /* The .p entry seam returns this string to the REST adapter

@@ -46,6 +46,12 @@ CLASS ClearVue.Connector.Web.ConnectorError INHERITS Progress.Lang.AppError:
         GET. PRIVATE SET.
     DEFINE PUBLIC PROPERTY CorrelationId AS CHARACTER NO-UNDO
         GET. SET.
+    /* SOL-119: SERVER-SIDE-ONLY raw detail (fully-qualified class names,
+       logical db name, OE error numbers). Deliberately EXCLUDED from ToJson()
+       -- it never crosses the wire. The entry seam logs it via ConnectorLog
+       keyed by CorrelationId. Wire `Diagnostic` stays sanitized. */
+    DEFINE PUBLIC PROPERTY RawDetail AS CHARACTER NO-UNDO
+        GET. SET.
     /* HTTP status the WebHandler must put on the wire for this error. */
     DEFINE PUBLIC PROPERTY HttpStatus AS INTEGER NO-UNDO
         GET. PRIVATE SET.
@@ -128,7 +134,8 @@ CLASS ClearVue.Connector.Web.ConnectorError INHERITS Progress.Lang.AppError:
     END METHOD.
 
     /* Render the contract Error body. Null/empty optional fields are omitted
-       (or null where the contract marks them nullable). */
+       (or null where the contract marks them nullable). RawDetail is
+       INTENTIONALLY never rendered (SOL-119 sanitization contract). */
     METHOD PUBLIC JsonObject ToJson():
         DEFINE VARIABLE oJson AS JsonObject NO-UNDO.
         oJson = NEW JsonObject().

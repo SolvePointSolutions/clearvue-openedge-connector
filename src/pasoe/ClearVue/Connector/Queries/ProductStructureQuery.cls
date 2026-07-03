@@ -45,6 +45,7 @@ USING Progress.Lang.*.
 USING ClearVue.Connector.Config.ConnectorConfig.
 USING ClearVue.Connector.Data.DatabaseConnection.
 USING ClearVue.Connector.Web.ConnectorError.
+USING ClearVue.Connector.Web.ErrorClassifier.
 
 BLOCK-LEVEL ON ERROR UNDO, THROW.
 
@@ -101,6 +102,9 @@ CLASS ClearVue.Connector.Queries.ProductStructureQuery:
        THROWs ConnectorError on connectivity/query failure. */
     METHOD PUBLIC INTEGER Execute(INPUT pcPart AS CHARACTER,
                                   INPUT pcSite AS CHARACTER):
+        DEFINE VARIABLE oClassified AS ConnectorError NO-UNDO.
+        DEFINE VARIABLE oFallback   AS ConnectorError NO-UNDO.
+
         EMPTY TEMP-TABLE ttProductStructure.
         ASSIGN
             iSeq         = 0
@@ -125,15 +129,22 @@ CLASS ClearVue.Connector.Queries.ProductStructureQuery:
         CATCH oConnErr AS ConnectorError:
             UNDO, THROW oConnErr.
         END CATCH.
+        /* SOL-119: classification step BEFORE the generic fallback. A known
+           connection-state fault (1006 db-not-connected, broker down, lost
+           connection, ...) anywhere in the message chain becomes a sanitized
+           retryable 503; only genuinely unknown faults fall through -- and
+           even then the wire diagnostic is sanitized, with the raw message
+           preserved server-side in RawDetail (logged by the entry seam,
+           keyed by correlationId). */
         CATCH oErr AS Progress.Lang.Error:
-            IF DatabaseConnection:IsDisconnectError(
-                   IF oErr:NumMessages > 0 THEN oErr:GetMessageNum(1) ELSE 0) THEN
-                UNDO, THROW ConnectorError:ErpDisconnected(
-                    "connection lost during structure explosion":U).
-            ELSE
-                UNDO, THROW ConnectorError:ErpQueryError(
-                    SUBSTITUTE("structure query failed: &1":U,
-                               IF oErr:NumMessages > 0 THEN oErr:GetMessage(1) ELSE "":U)).
+            oClassified = ErrorClassifier:ClassifyConnectionState(oErr).
+            IF VALID-OBJECT(oClassified) THEN
+                UNDO, THROW oClassified.
+
+            oFallback = ConnectorError:ErpQueryError(
+                "structure query failed unexpectedly":U).
+            oFallback:RawDetail = ErrorClassifier:RawDetailOf(oErr).
+            UNDO, THROW oFallback.
         END CATCH.
     END METHOD.
 

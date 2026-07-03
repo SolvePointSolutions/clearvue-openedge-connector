@@ -18,6 +18,8 @@
       - ProductStructureQuery       the ported BOM explosion
       - ProductStructureJsonComposer hand-composed contract JSON
       - ConnectorError              contract Error body + status mapping
+      - ErrorClassifier             SOL-119 connection-state classification
+      - ConnectorLog                SOL-119 server-side raw-diagnostic log
     The .p instantiates/calls them; it does NOT inline their logic.
 
     HTTP STATUS: useReturnValue="true" (annotation above) maps this procedure's
@@ -34,7 +36,10 @@
     PARAMS (mapped in the REST resource):
       part          QUERY   required
       site          QUERY   required
-      correlationId QUERY   optional
+      correlationId QUERY   optional -- SOL-119: the connector GENERATES a
+                            GUID when absent, echoes it in every Error body,
+                            and keys the server-side raw-diagnostic log line
+                            (ConnectorLog) by it.
       authHeader    HEADER  ("Authorization")
     OUTPUT:
       responseBody  LONGCHAR  the JSON array (200) or the contract Error body.
@@ -48,6 +53,8 @@ USING ClearVue.Connector.Security.ApiKeyAuthenticator.
 USING ClearVue.Connector.Queries.ProductStructureQuery.
 USING ClearVue.Connector.Json.ProductStructureJsonComposer.
 USING ClearVue.Connector.Web.ConnectorError.
+USING ClearVue.Connector.Web.ErrorClassifier.
+USING ClearVue.Connector.Logging.ConnectorLog.
 
 /* ---- mapped interface ---- */
 DEFINE INPUT  PARAMETER part          AS CHARACTER NO-UNDO.
@@ -62,12 +69,13 @@ DEFINE INPUT  PARAMETER authHeader    AS CHARACTER NO-UNDO.
 DEFINE OUTPUT PARAMETER responseBody  AS LONGCHAR  NO-UNDO.
 
 /* ---- locals ---- */
-DEFINE VARIABLE oConfig   AS ConnectorConfig             NO-UNDO.
-DEFINE VARIABLE oAuth     AS ApiKeyAuthenticator         NO-UNDO.
-DEFINE VARIABLE oDb       AS DatabaseConnection          NO-UNDO.
-DEFINE VARIABLE oQuery    AS ProductStructureQuery       NO-UNDO.
-DEFINE VARIABLE oComposer AS ProductStructureJsonComposer NO-UNDO.
-DEFINE VARIABLE iRows     AS INTEGER                     NO-UNDO.
+DEFINE VARIABLE oConfig     AS ConnectorConfig             NO-UNDO.
+DEFINE VARIABLE oAuth       AS ApiKeyAuthenticator         NO-UNDO.
+DEFINE VARIABLE oDb         AS DatabaseConnection          NO-UNDO.
+DEFINE VARIABLE oQuery      AS ProductStructureQuery       NO-UNDO.
+DEFINE VARIABLE oComposer   AS ProductStructureJsonComposer NO-UNDO.
+DEFINE VARIABLE iRows       AS INTEGER                     NO-UNDO.
+DEFINE VARIABLE oClassified AS ConnectorError              NO-UNDO.
 
 /* ---- forward declarations (functions defined after the main block) ---- */
 FUNCTION RunWithReconnect RETURNS INTEGER
@@ -80,10 +88,18 @@ FUNCTION FailWith  RETURNS CHARACTER      (INPUT poErr AS ConnectorError) FORWAR
 
 oConfig = NEW ConnectorConfig().
 
+/* 0. correlation id -- SOL-119: ALWAYS have one. Caller-supplied wins;
+   otherwise the connector generates a GUID so every error envelope carries
+   a correlationId that resolves to the raw diagnostic in the connector log
+   (ConnectorLog writes it; the raw detail never crosses the wire). */
+correlationId = TRIM(correlationId).
+IF correlationId = ? OR correlationId = "":U THEN
+    correlationId = GUID(GENERATE-UUID).
+
 /* 1. auth first -- no DB work for an unauthorized caller */
 oAuth = NEW ApiKeyAuthenticator(oConfig).
 IF NOT oAuth:IsAuthorizedHeader(authHeader) THEN
-    RETURN FailWith(ConnectorError:Unauthorized()).
+    RETURN FailWith(WithCorr(ConnectorError:Unauthorized())).
 
 /* 2. validate params */
 ASSIGN
@@ -94,8 +110,17 @@ IF part = "":U THEN
 IF site = "":U THEN
     RETURN FailWith(WithCorr(ConnectorError:BadRequest("site is required":U))).
 
-/* 3-4. run with one reconnect-and-retry on a mid-query disconnect */
-oDb    = NEW DatabaseConnection(oConfig).
+/* 3. pre-flight the DB gate BEFORE instantiating the query class (SOL-119).
+   ProductStructureQuery's r-code references the ERP schema (pt_mstr/ps_mstr/
+   ...), so with the DB down the NEW itself raises raw OE error 1006
+   ("Database <name> not connected.") before Execute()/EnsureConnected() ever
+   runs -- that raw fault is what previously fell into the generic catch-all
+   as INTERNAL/500. Gating here means a stopped DB takes the structured
+   reconnect path (-> 503 retryable) instead. */
+oDb = NEW DatabaseConnection(oConfig).
+oDb:EnsureConnected().
+
+/* 4. run with one reconnect-and-retry on a mid-query disconnect */
 oQuery = NEW ProductStructureQuery(oConfig, oDb).
 iRows  = RunWithReconnect(oQuery, oDb, part, site).
 
@@ -116,10 +141,22 @@ RETURN "200":U.
 CATCH oCErr AS ConnectorError:
     RETURN FailWith(WithCorr(oCErr)).
 END CATCH.
+/* SOL-119: classification step BEFORE the generic catch-all verdict. A known
+   OpenEdge connection-state fault (db not connected / broker down / lost
+   connection / connect refused) becomes 503 ERP_CONNECTIVITY retryable with
+   a sanitized reason. Only a genuinely unknown fault stays INTERNAL/500/
+   non-retryable -- and its wire diagnostic is now sanitized too: the raw
+   message (class names, db name, OE error numbers) goes to the connector
+   log via FailWith, keyed by the correlationId echoed in the envelope. */
 CATCH oErr AS Progress.Lang.Error:
-    RETURN FailWith(WithCorr(
-        ConnectorError:Internal(
-            IF oErr:NumMessages > 0 THEN oErr:GetMessage(1) ELSE "unexpected":U))).
+    oClassified = ErrorClassifier:ClassifyConnectionState(oErr).
+    IF NOT VALID-OBJECT(oClassified) THEN
+    DO:
+        oClassified = ConnectorError:Internal(
+            "unexpected connector fault; quote the correlationId to support":U).
+        oClassified:RawDetail = ErrorClassifier:RawDetailOf(oErr).
+    END.
+    RETURN FailWith(WithCorr(oClassified)).
 END CATCH.
 
 /* ---- internal procedures (thin glue; no business logic) ---- */
@@ -134,7 +171,9 @@ FUNCTION RunWithReconnect RETURNS INTEGER
     RETURN poQuery:Execute(pcPart, pcSite).
 
     CATCH oCErr AS ConnectorError:
-        IF oCErr:Code = "ERP_DISCONNECTED":U THEN
+        /* retry once on either transient connection-state code (SOL-119:
+           the classifier can surface ERP_UNAVAILABLE mid-query too) */
+        IF oCErr:Code = "ERP_DISCONNECTED":U OR oCErr:Code = "ERP_UNAVAILABLE":U THEN
         DO:
             poDb:EnsureConnected().    /* throws (->503/504) if still unhealable */
             RETURN poQuery:Execute(pcPart, pcSite).
@@ -143,7 +182,8 @@ FUNCTION RunWithReconnect RETURNS INTEGER
     END CATCH.
 END FUNCTION.
 
-/* Stamp the optional correlation id onto an error. */
+/* Stamp the correlation id onto an error (always present -- caller-supplied
+   or connector-generated at step 0). */
 FUNCTION WithCorr RETURNS ConnectorError
     (INPUT poErr AS ConnectorError):
     IF correlationId <> ? AND TRIM(correlationId) <> "":U THEN
@@ -152,9 +192,13 @@ FUNCTION WithCorr RETURNS ConnectorError
 END FUNCTION.
 
 /* Render the error body to the OUTPUT param and yield the status code string
-   the REST adapter maps to the HTTP status line. */
+   the REST adapter maps to the HTTP status line. SOL-119: this is also the
+   single server-side logging point -- any raw detail carried on the error
+   (never serialized) is written to the connector log keyed by the
+   correlationId before the sanitized envelope goes on the wire. */
 FUNCTION FailWith RETURNS CHARACTER
     (INPUT poErr AS ConnectorError):
+    ConnectorLog:WriteError(poErr:CorrelationId, poErr:Code, poErr:RawDetail).
     responseBody = poErr:ToJsonString().
     RETURN poErr:StatusString().
 END FUNCTION.

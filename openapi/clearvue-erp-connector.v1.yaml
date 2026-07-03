@@ -204,8 +204,10 @@ components:
       in: query
       required: false
       description: >
-        Optional caller-supplied correlation id. The connector echoes it in the Error body
-        (and SHOULD log it) so ClearVue and connector logs can be matched for support.
+        Optional caller-supplied correlation id. When absent the connector GENERATES one
+        (a GUID). Either way it is echoed in the Error body and keys the connector's
+        server-side raw-diagnostic log line, so ClearVue and connector logs can be
+        matched for support.
       schema: { type: string }
 
   responses:
@@ -247,7 +249,8 @@ components:
             retryable: true
             retryAfterSeconds: 5
             message: "ERP database is restarting; retry shortly."
-            diagnostic: "client/server connection to qaddb dropped; reconnect attempted 3x"
+            correlationId: "6f1f2c1e-9d1a-4b7e-8f3a-2c1d0e9b7a55"
+            diagnostic: "upstream ERP connection could not be re-established within the retry budget; retry shortly"
     ErpTimeout:
       description: Query exceeded the connector's time budget (504, retryable)
       content:
@@ -297,7 +300,10 @@ components:
           description: Hint for how long to wait before retrying a retryable error.
         correlationId:
           type: string
-          description: Echoes the request correlation id so SaaS and connector logs match for support.
+          description: >
+            Echoes the request correlation id (connector-generated when the caller sent
+            none) so SaaS and connector logs match for support — the connector's
+            server-side log carries the full raw diagnostic keyed by this id.
         timestamp:
           type: string
           format: date-time
@@ -305,8 +311,11 @@ components:
           type: string
           nullable: true
           description: >
-            Optional SAFE operator-facing hint to guide assistance — e.g. "client/server
-            connection to qaddb dropped; reconnect attempted 3x". Sanitized; never secrets/PII.
+            Optional SAFE operator-facing hint to guide assistance — e.g. "upstream ERP
+            connection could not be re-established within the retry budget". Sanitized:
+            never secrets/PII, and never infrastructure topology (no db name, no class
+            name, no Progress error number). The raw detail lives only in the connector's
+            server-side log, keyed by correlationId.
 
     # Canonical = ClearVue SaaS model property names → stock output is identity.
     StructureComponent:

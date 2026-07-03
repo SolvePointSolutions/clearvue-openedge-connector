@@ -30,7 +30,9 @@
           connection-loss errors (e.g. 748/793/1422 range) surfaced via
           ERROR-STATUS:GET-NUMBER. The precise code(s) raised by THIS site's
           broker restart MUST be observed on the 11.6/MPI box and pinned in
-          IsDisconnectError() -- see the connection-failure test below.
+          the ErrorClassifier table (SOL-119: the single classification
+          table; extendable per site via CLEARVUE_CONNECTION_STATE_ERROR_CODES)
+          -- see the connection-failure test below.
 
     One responsibility: connection lifecycle + reconnect. No JSON, no auth,
     no query logic.
@@ -70,6 +72,7 @@ CLASS ClearVue.Connector.Data.DatabaseConnection:
         DEFINE VARIABLE iElapsedMs  AS INTEGER NO-UNDO.
         DEFINE VARIABLE lConnected  AS LOGICAL NO-UNDO.
         DEFINE VARIABLE cLastDiag   AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE oFail       AS ConnectorError NO-UNDO.
 
         IF CONNECTED(oConfig:LogicalDbName) THEN
             RETURN.   /* fast path: healthy persistent connection */
@@ -78,12 +81,20 @@ CLASS ClearVue.Connector.Data.DatabaseConnection:
 
         DO iAttempt = 1 TO oConfig:ReconnectMaxAttempts:
 
-            /* budget guard: never blow the reconnect ceiling */
+            /* budget guard: never blow the reconnect ceiling.
+               SOL-119 sanitization: the wire diagnostic is a stable reason
+               with NO db name / OE code; the topology detail goes to
+               RawDetail (server-side log only, keyed by correlationId). */
             iElapsedMs = ETIME - iStartMs.
             IF iElapsedMs >= oConfig:ReconnectCeilingMs THEN
-                UNDO, THROW ConnectorError:ErpTimeout(
-                    SUBSTITUTE("reconnect to &1 exceeded budget after &2 attempt(s)":U,
-                               oConfig:LogicalDbName, iAttempt - 1)).
+            DO:
+                oFail = ConnectorError:ErpTimeout(
+                    "reconnect to the upstream ERP did not complete within the time budget":U).
+                oFail:RawDetail = SUBSTITUTE(
+                    "reconnect to &1 exceeded budget (&2 ms) after &3 attempt(s)":U,
+                    oConfig:LogicalDbName, iElapsedMs, iAttempt - 1).
+                UNDO, THROW oFail.
+            END.
 
             CleanStaleState().
 
@@ -98,12 +109,19 @@ CLASS ClearVue.Connector.Data.DatabaseConnection:
 
         /* exhausted attempts inside budget -> retryable connectivity error.
            ERP_DISCONNECTED = a prior connection dropped (DB restart);
-           the structured 503 lets ClearVue auto-retry the bounce. */
-        UNDO, THROW ConnectorError:ErpDisconnected(
-            SUBSTITUTE("client/server connection to &1 dropped; reconnect attempted &2x; &3":U,
-                       oConfig:LogicalDbName,
-                       oConfig:ReconnectMaxAttempts,
-                       cLastDiag)).
+           the structured 503 lets ClearVue auto-retry the bounce.
+           SOL-119: wire diagnostic sanitized; db name + attempt count +
+           CONNECT failure code stay server-side in RawDetail. Note this
+           path also covers a LOGIN failure on reconnect (bad/changed
+           credentials surface as a failed CONNECT). */
+        oFail = ConnectorError:ErpDisconnected(
+            "upstream ERP connection could not be re-established within the retry budget; retry shortly":U).
+        oFail:RawDetail = SUBSTITUTE(
+            "client/server connection to &1 dropped; reconnect attempted &2x; &3":U,
+            oConfig:LogicalDbName,
+            oConfig:ReconnectMaxAttempts,
+            cLastDiag).
+        UNDO, THROW oFail.
     END METHOD.
 
     /* If a half-dead handle lingers, drop it before re-CONNECT. */
@@ -142,15 +160,14 @@ CLASS ClearVue.Connector.Data.DatabaseConnection:
 
     /* Classify an OE error number as a client/server disconnect so a
        mid-query failure can be retried-once as a reconnect (vs a real app
-       error which must propagate). PIN the exact code(s) for this site's
-       broker restart on the spike; the set below is the documented family. */
+       error which must propagate).
+
+       SOL-119: delegates to the SINGLE table in ErrorClassifier (which also
+       covers 1006 "Database not connected" and the env-pinned site codes) so
+       the pre-flight test and the raw-fault classification can never drift.
+       Kept as a named seam for callers/tests. */
     METHOD PUBLIC STATIC LOGICAL IsDisconnectError(INPUT piErrNum AS INTEGER):
-        /* 1423  no server for database (broker down / restarting)
-           1422  connection to the database lost
-           748   broker could not be reached / refused
-           793   lost connection to server
-           Confirm/extend against the live broker-restart error on the spike. */
-        RETURN CAN-DO("1423,1422,748,793":U, STRING(piErrNum)).
+        RETURN ClearVue.Connector.Web.ErrorClassifier:IsConnectionStateError(piErrNum).
     END METHOD.
 
     /* Lightweight probe for /health -- never throws; just reports reachability. */
