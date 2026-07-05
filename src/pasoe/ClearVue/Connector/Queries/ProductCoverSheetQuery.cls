@@ -28,9 +28,11 @@
       - QtyPallet fallback from the PQ.txt / prdlist.prn file imports and the
         t-pallet / t-pick temp-tables: all commented out in the legacy. We use
         ptp_ord_mult only; QtyPallet is blank when that is 0/absent.
-      - Note1..Note10: the legacy sourced these from chkCust's t-shp, populated
-        from a dead prdlist.prn import -- so they were effectively always blank.
-        Emitted as null here until a real notes source is confirmed (OPEN item).
+      - Note1..Note10 (SOL-173): the legacy sourced these from chkCust's t-shp,
+        populated from a dead prdlist.prn import -- so they were effectively
+        always blank. Emitted as null here (contract documents them UNPOPULATED,
+        pending a real notes source -- a consumer must not read null as "no
+        notes"). Wiring a source is out of scope for SOL-173.
 
     EXISTENCE: a real pt_mstr lookup (PartExists()); a part absent from pt_mstr
     -> caller 404. A part that exists returns 200 with whatever header/structure/

@@ -385,6 +385,11 @@ components:
 
     CoverSheetHeader:
       type: object
+      description: >
+        Cover-sheet header. NOTE (SOL-173): Note1..Note10 are UNPOPULATED in v1 --
+        the connector always emits null for them (no ERP notes source is wired
+        yet). Read a null Note as "notes source not yet wired", not as "no notes
+        present". Every other field is populated from live MFG/PRO joins.
       properties:
         ShipTo:         { type: string }
         ShipName:       { type: string }
@@ -396,16 +401,23 @@ components:
         CustItem:       { type: string }
         RouteCode:      { type: string }
         QtyPallet:      { type: string }
-        Note1:  { type: string, nullable: true }
-        Note2:  { type: string, nullable: true }
-        Note3:  { type: string, nullable: true }
-        Note4:  { type: string, nullable: true }
-        Note5:  { type: string, nullable: true }
-        Note6:  { type: string, nullable: true }
-        Note7:  { type: string, nullable: true }
-        Note8:  { type: string, nullable: true }
-        Note9:  { type: string, nullable: true }
-        Note10: { type: string, nullable: true }
+        # SOL-173: Note1..Note10 are UNPOPULATED in v1 -- the connector always
+        # emits null for them because no ERP notes source is wired yet (the
+        # legacy source, chkCust/t-shp, was a dead prdlist.prn file import).
+        # A consumer MUST read null here as "notes source not yet wired", NOT as
+        # "this cover sheet has no notes". When a real source lands, these will
+        # start carrying text without a contract change (they are already
+        # nullable strings). The description is shared via a YAML anchor.
+        Note1:  { type: string, nullable: true, description: &noteUnpopulated "UNPOPULATED in v1 -- always null; no ERP notes source is wired yet (SOL-173). Treat null as 'notes source not yet wired', NOT as 'no notes present'." }
+        Note2:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note3:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note4:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note5:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note6:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note7:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note8:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note9:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note10: { type: string, nullable: true, description: *noteUnpopulated }
 
     CoverSheet:
       type: object
