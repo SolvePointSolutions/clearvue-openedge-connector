@@ -61,6 +61,7 @@ DEFINE VARIABLE oDb         AS DatabaseConnection       NO-UNDO.
 DEFINE VARIABLE oQuery      AS ProductRouteQuery        NO-UNDO.
 DEFINE VARIABLE oComposer   AS ProductRouteJsonComposer NO-UNDO.
 DEFINE VARIABLE oClassified AS ConnectorError           NO-UNDO.
+DEFINE VARIABLE iRows       AS INTEGER                  NO-UNDO.
 /* cSite: the MFG/PRO site the ERP query keys on (the wire speaks `facility`,
    the external facility code; this is the internal ERP-vocabulary target). */
 DEFINE VARIABLE cSite       AS CHARACTER                NO-UNDO.
@@ -102,9 +103,11 @@ cSite = facility.
 oDb = NEW DatabaseConnection(oConfig).
 oDb:EnsureConnected().
 
-/* 4. run with one reconnect-and-retry on a mid-query disconnect. */
+/* 4. run with one reconnect-and-retry on a mid-query disconnect. (row count
+      captured but not used for control flow -- the 404 decision is PartExists();
+      assigned because ABL consumes a user-defined function's return value.) */
 oQuery = NEW ProductRouteQuery(oConfig, oDb).
-RunWithReconnect(oQuery, oDb, partNumber, cSite).
+iRows  = RunWithReconnect(oQuery, oDb, partNumber, cSite).
 
 /* 5. part not in pt_mstr -> 404 (genuinely not found in the ERP). A part that
       exists with no routing returns 200 with an empty array below. */

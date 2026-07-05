@@ -55,6 +55,7 @@ DEFINE VARIABLE oDb         AS DatabaseConnection           NO-UNDO.
 DEFINE VARIABLE oQuery      AS ProductCoverSheetQuery       NO-UNDO.
 DEFINE VARIABLE oComposer   AS ProductCoverSheetJsonComposer NO-UNDO.
 DEFINE VARIABLE oClassified AS ConnectorError               NO-UNDO.
+DEFINE VARIABLE lRan        AS LOGICAL                      NO-UNDO.
 DEFINE VARIABLE cSite       AS CHARACTER                    NO-UNDO.
 
 /* ---- forward declarations ---- */
@@ -94,9 +95,11 @@ cSite = facility.
 oDb = NEW DatabaseConnection(oConfig).
 oDb:EnsureConnected().
 
-/* 4. assemble with one reconnect-and-retry on a mid-query disconnect */
+/* 4. assemble with one reconnect-and-retry on a mid-query disconnect (result
+      assigned because ABL consumes a user-defined function's return value; the
+      404 decision is PartExists()). */
 oQuery = NEW ProductCoverSheetQuery(oConfig, oDb).
-RunWithReconnect(oQuery, oDb, partNumber, cSite).
+lRan   = RunWithReconnect(oQuery, oDb, partNumber, cSite).
 
 /* 5. part not in pt_mstr -> 404 */
 IF NOT oQuery:PartExists() THEN
