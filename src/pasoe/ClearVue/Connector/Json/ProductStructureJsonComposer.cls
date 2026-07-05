@@ -26,13 +26,24 @@ CLASS ClearVue.Connector.Json.ProductStructureJsonComposer:
     /* Quantity scale per the contract (feasibility-11.6 §3). */
     DEFINE PRIVATE VARIABLE iQtyScale AS INTEGER NO-UNDO INITIAL 4.
 
-    /* Compose from the result temp-table HANDLE (rows in SeqNo order). */
+    /* Compose from the result temp-table HANDLE (rows in SeqNo order) to a
+       standalone LONGCHAR array (the /product-structure body). */
     METHOD PUBLIC LONGCHAR Compose(INPUT phTable AS HANDLE):
+        DEFINE VARIABLE oArray AS JsonArray NO-UNDO.
+        DEFINE VARIABLE lcOut  AS LONGCHAR  NO-UNDO.
+        oArray = ComposeArray(INPUT phTable).
+        oArray:Write(OUTPUT lcOut).
+        RETURN lcOut.
+    END METHOD.
+
+    /* Build the StructureComponent[] JsonArray from the result temp-table
+       HANDLE. Exposed so the cover sheet can embed the SAME structure array
+       under its "Structure" member (identical shape, one BOM truth). */
+    METHOD PUBLIC JsonArray ComposeArray(INPUT phTable AS HANDLE):
         DEFINE VARIABLE oArray  AS JsonArray  NO-UNDO.
         DEFINE VARIABLE oRow    AS JsonObject NO-UNDO.
         DEFINE VARIABLE hBuffer AS HANDLE     NO-UNDO.
         DEFINE VARIABLE hQuery  AS HANDLE     NO-UNDO.
-        DEFINE VARIABLE lcOut   AS LONGCHAR   NO-UNDO.
 
         oArray  = NEW JsonArray().
         hBuffer = phTable:DEFAULT-BUFFER-HANDLE.
@@ -67,8 +78,7 @@ CLASS ClearVue.Connector.Json.ProductStructureJsonComposer:
             hQuery:GET-NEXT().
         END.
 
-        oArray:Write(OUTPUT lcOut).
-        RETURN lcOut.
+        RETURN oArray.
 
         FINALLY:
             IF VALID-HANDLE(hQuery) THEN

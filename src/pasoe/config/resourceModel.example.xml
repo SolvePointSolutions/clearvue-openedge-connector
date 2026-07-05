@@ -64,5 +64,17 @@
     </prgs:operation>
   </prgs:resource>
 
-  <!-- /product-cover-sheet added when that endpoint is built. -->
+  <!-- GET /product-cover-sheet?partNumber=&facility=&correlationId=  (+ Authorization header)
+       Business vocabulary, aligned with the sibling endpoints. Combined envelope:
+       header + structure + full-shape route + comments. -->
+  <prgs:resource consumes="application/json" name="_productcoversheet" path="/product-cover-sheet" produces="application/json">
+    <prgs:operation name="GetProductCoverSheet" verb="GET"
+                    consumes="application/json" produces="application/json"
+                    idls="ClearVue/Connector/Rest/GetProductCoverSheet.pidl::com.progress.openedge.pdt.bpmbindings">
+      <prgs:param name="partNumber"    type="QUERY"/>
+      <prgs:param name="facility"      type="QUERY"/>
+      <prgs:param name="correlationId" type="QUERY"/>
+      <prgs:param name="authHeader" type="HEADER" headerName="Authorization"/>
+    </prgs:operation>
+  </prgs:resource>
 </prgs:model>

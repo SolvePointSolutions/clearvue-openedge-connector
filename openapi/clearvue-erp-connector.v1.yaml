@@ -171,8 +171,8 @@ paths:
         end-to-end on 11.6 first. The cover-sheet route rows carry two extra fields
         (PiecesPerHour, WorkCenterDescription) that the standalone route omits.
       parameters:
-        - $ref: "#/components/parameters/Part"
-        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/PartNumber"
+        - $ref: "#/components/parameters/Facility"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
         "200":
@@ -217,22 +217,10 @@ components:
         target ERP recognizes for the location. The connector maps this facility code
         to the MFG/PRO site internally, so no ERP-specific term crosses the wire.
       schema: { type: string, maxLength: 20 }
-    # Legacy ERP-vocabulary params — still referenced by the DRAFT /product-route and
-    # /product-cover-sheet endpoints (not yet built). SOL-51 aligned /product-structure
-    # to partNumber/facility above; aligning the remaining draft endpoints is a follow-up
-    # (see docs/contract-vocabulary.md) to be done when those endpoints are implemented.
-    Part:
-      name: part
-      in: query
-      required: true
-      description: ERP part number.
-      schema: { type: string, maxLength: 50 }
-    Site:
-      name: site
-      in: query
-      required: true
-      description: ERP site / plant number.
-      schema: { type: string, maxLength: 20 }
+    # Legacy ERP-vocabulary params (part / site) RETIRED 2026-07-05: all three
+    # lookups now use the business vocabulary partNumber + facility above. The
+    # ERP terms ("site") stay INSIDE the connector (facility -> site mapping in
+    # each .p). See docs/contract-vocabulary.md.
     CorrelationId:
       name: correlationId
       in: query
