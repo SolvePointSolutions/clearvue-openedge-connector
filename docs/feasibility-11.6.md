@@ -145,9 +145,9 @@ request header to a param — important, because PASOE Web handlers cannot read 
 | Operation | Producible on 11.6? | Notes |
 |---|---|---|
 | `/health` | ✅ | REST-adapter `.p` (`GetHealth.p`); lightweight `CONNECTED()` probe; always 200. |
-| `/product-structure` | ✅ | REST-adapter `.p` (`GetProductStructure.p`); flat `JsonArray`; legacy `xx-bmpsrp.p` query logic. |
-| `/product-route` | ✅ | REST-adapter `.p`; flat `JsonArray`; legacy `xx-rorp.p` query logic. |
-| `/product-cover-sheet` | ✅ design-cleared; latency TBM | Nested envelope hand-composed via JSON Object Model; a *compose* step once the pieces are proven. |
+| `/product-structure` | ✅ built | REST-adapter `.p` (`GetProductStructure.p`); flat `JsonArray`; legacy `xx-bmpsrp.p` query logic. |
+| `/product-route` | ✅ built | `GetProductRoute.p` + `ProductRouteQuery`/`ProductRouteJsonComposer`; canonical `RouteStep[]` (standalone shape); legacy `xx-rorp.p` logic. Cross-machine verify pending (Rod). |
+| `/product-cover-sheet` | ✅ built; latency TBM | `GetProductCoverSheet.p` + `ProductCoverSheetQuery` (reuses the structure + route engines) + `ProductCoverSheetJsonComposer`; nested envelope hand-composed via the JSON Object Model — the *compose* step, proven pieces. Legacy `xx-rprdcvr.p`/`CoverSheetTT.i` logic. Latency still to be measured on real MPI. |
 
 **POC order (walking skeleton):** `/health` (step 0 — proves PASOE deploy + DB connection + auth) → **`/product-structure`** (the real POC: first query, flat `JsonArray`, formatting, **reconnect**, **latency** — exercises every cross-cutting concern) → `/product-route` → `/product-cover-sheet` (compose the nested envelope from the now-proven structure/route pieces + header + comments). The cover sheet no longer needs to go first: its only unique risk — nested serialization — was retired by the JSON Object Model decision (§3), so build the thinnest slice first and let the envelope be an incremental compose. The structure POC must explicitly prove the two genuinely-open items: DB-restart reconnect and cover-sheet-scale latency.
 
