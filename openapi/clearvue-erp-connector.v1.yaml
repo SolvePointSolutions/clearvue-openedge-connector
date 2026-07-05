@@ -22,6 +22,13 @@
 #     so stock output == SaaS model == identity.
 #   - Domain is CONNECTOR CONFIGURATION, not a request param (one connector instance
 #     serves one ERP domain). Legacy hardcoded "MPI"; here it's configured, not passed.
+#     It is NEVER on the wire.
+#   - Query params use ClearVue BUSINESS vocabulary, not ERP vocabulary (SOL-51):
+#     `partNumber` (the part identifier) and `facility`. `facility` carries the
+#     EXTERNAL FACILITY CODE the ERP uses to identify the location (a string, e.g.
+#     "1000") — NOT a ClearVue facility Guid. The connector maps that external
+#     facility code to the MFG/PRO site internally, so no ERP term ("site") crosses
+#     the wire. See docs/contract-vocabulary.md.
 #   - Auth is an ENFORCED header (legacy used an unenforced query param).
 #   - `Reference` (the legacy cover-sheet "Refinance" typo is fixed).
 #   - Structured ERROR model (code + category + retryable + correlationId + safe diagnostic)
@@ -80,7 +87,7 @@ paths:
     get:
       tags: [lookups]
       operationId: getProductStructure
-      summary: Product structure (BOM) for a part at a site
+      summary: Product structure (BOM) for a part at a facility
       description: >
         Returns the requested part as a root ("Parent") row followed by its
         exploded BOM components. The root row is ALWAYS present when the part
@@ -90,8 +97,8 @@ paths:
         not exist in the ERP. The root row's Quantity is 1 by convention (the
         root has no quantity-per-parent; 1 keeps column arithmetic safe).
       parameters:
-        - $ref: "#/components/parameters/Part"
-        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/PartNumber"
+        - $ref: "#/components/parameters/Facility"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
         "200":
@@ -187,6 +194,27 @@ components:
         adaptor used an unenforced query-string key — not carried forward.)
 
   parameters:
+    # ClearVue business-vocabulary params (SOL-51) — used by /product-structure.
+    PartNumber:
+      name: partNumber
+      in: query
+      required: true
+      description: The part identifier — the part number to look up in the ERP.
+      schema: { type: string, maxLength: 50 }
+    Facility:
+      name: facility
+      in: query
+      required: true
+      description: >
+        The EXTERNAL FACILITY CODE the ERP uses to identify the location — a string
+        code (e.g. "1000"). This is NOT a ClearVue facility Guid; it is the code the
+        target ERP recognizes for the location. The connector maps this facility code
+        to the MFG/PRO site internally, so no ERP-specific term crosses the wire.
+      schema: { type: string, maxLength: 20 }
+    # Legacy ERP-vocabulary params — still referenced by the DRAFT /product-route and
+    # /product-cover-sheet endpoints (not yet built). SOL-51 aligned /product-structure
+    # to partNumber/facility above; aligning the remaining draft endpoints is a follow-up
+    # (see docs/contract-vocabulary.md) to be done when those endpoints are implemented.
     Part:
       name: part
       in: query
@@ -216,7 +244,7 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
-          example: { code: BAD_REQUEST, category: REQUEST, retryable: false, message: "part is required" }
+          example: { code: BAD_REQUEST, category: REQUEST, retryable: false, message: "partNumber is required" }
     Unauthorized:
       description: Missing/invalid credentials (401)
       content:
@@ -231,7 +259,7 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
-          example: { code: NOT_FOUND, category: DATA, retryable: false, message: "part PUMP-XYZ not found in ERP for site 1000" }
+          example: { code: NOT_FOUND, category: DATA, retryable: false, message: "part PUMP-XYZ not found in ERP for facility 1000" }
     ErpUnavailable:
       description: >
         ERP database unreachable — transient (503, retryable). `code` is `ERP_DISCONNECTED`

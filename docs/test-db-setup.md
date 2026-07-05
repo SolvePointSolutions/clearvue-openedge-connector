@@ -71,7 +71,7 @@ the same OOABL logic the REST adapter would):
 ```sh
 pro -db clearvue-test -ld qaddb -1 -p ClearVue/Connector/Rest/GetProductStructure.p
 # (set CLEARVUE_ERP_DOMAIN=MPI and CLEARVUE_CONNECTOR_API_KEY first; pass
-#  part=PUMP-ASSY-100 site=1000 and "Bearer <key>" as the authorization param.)
+#  partNumber=PUMP-ASSY-100 facility=1000 and "Bearer <key>" as the authorization param.)
 ```
 
 ## Expected output (deterministic — diff targets)
@@ -80,7 +80,7 @@ Three deterministic cases prove the SOL-58 root-row / 404 semantics:
 
 ### Case 1 — part with a multi-level BOM (200, root + children)
 
-`GET /product-structure?part=PUMP-ASSY-100&site=1000` must return exactly
+`GET /product-structure?partNumber=PUMP-ASSY-100&facility=1000` must return exactly
 [`samples/product-structure.example.json`](../samples/product-structure.example.json):
 
 - Root row `PUMP-ASSY-100` (Level `Parent`, **Qty 1** — root convention).
@@ -91,7 +91,7 @@ Three deterministic cases prove the SOL-58 root-row / 404 semantics:
 
 ### Case 2 — part that EXISTS but has no BOM (200, root row ONLY)
 
-`GET /product-structure?part=HOUSING-100&site=1000` must return exactly
+`GET /product-structure?partNumber=HOUSING-100&facility=1000` must return exactly
 [`samples/product-structure-no-bom.example.json`](../samples/product-structure-no-bom.example.json):
 a single root row for `HOUSING-100` (Level `Parent`, Qty 1). `HOUSING-100` is in
 `pt_mstr` but is no parent in `ps_mstr`, so it exists with no components — this is
@@ -99,7 +99,7 @@ a single root row for `HOUSING-100` (Level `Parent`, Qty 1). `HOUSING-100` is in
 
 ### Case 3 — part that does NOT exist (404)
 
-`GET /product-structure?part=NOPE-999&site=1000` must return **404** with the
+`GET /product-structure?partNumber=NOPE-999&facility=1000` must return **404** with the
 contract `Error` body (`code: NOT_FOUND`). `NOPE-999` is absent from `pt_mstr`, so
 the existence gate yields 0 rows → 404. This is the ONLY 404 path.
 
@@ -116,11 +116,11 @@ Diff the live responses against the committed samples to confirm no regression:
 
 ```sh
 curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
-  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=PUMP-ASSY-100&site=1000" \
+  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?partNumber=PUMP-ASSY-100&facility=1000" \
   | diff - ../../samples/product-structure.example.json          # Case 1 (from test/fixtures)
 
 curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
-  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=HOUSING-100&site=1000" \
+  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?partNumber=HOUSING-100&facility=1000" \
   | diff - ../../samples/product-structure-no-bom.example.json   # Case 2
 ```
 

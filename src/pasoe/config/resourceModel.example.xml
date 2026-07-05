@@ -9,7 +9,7 @@
   is explicit and reviewable.
 
   Param `type` values used:
-    QUERY   -> query-string parameter         (part, site, correlationId)
+    QUERY   -> query-string parameter         (partNumber, facility, correlationId)
     HEADER  -> inbound HTTP request header     (Authorization)  <-- key point:
               the classic REST adapter CAN surface a request header to a
               CHARACTER input param; PASOE Web handlers cannot read Authorization.
@@ -29,13 +29,16 @@
                     idls="ClearVue/Connector/Rest/GetHealth.pidl::com.progress.openedge.pdt.bpmbindings"/>
   </prgs:resource>
 
-  <!-- GET /product-structure?part=&site=&correlationId=  (+ Authorization header) -->
+  <!-- GET /product-structure?partNumber=&facility=&correlationId=  (+ Authorization header)
+       SOL-51: wire vocabulary is ClearVue business language. `facility` carries the
+       EXTERNAL facility code the ERP uses to identify the location (NOT a Guid); the
+       .p maps it to the MFG/PRO site internally. `domain` is NOT a param (config). -->
   <prgs:resource consumes="application/json" name="_productstructure" path="/product-structure" produces="application/json">
     <prgs:operation name="GetProductStructure" verb="GET"
                     consumes="application/json" produces="application/json"
                     idls="ClearVue/Connector/Rest/GetProductStructure.pidl::com.progress.openedge.pdt.bpmbindings">
-      <prgs:param name="part"          type="QUERY"/>
-      <prgs:param name="site"          type="QUERY"/>
+      <prgs:param name="partNumber"    type="QUERY"/>
+      <prgs:param name="facility"      type="QUERY"/>
       <prgs:param name="correlationId" type="QUERY"/>
       <!-- map the inbound Authorization header to the .p's `authHeader` param.
            NB: the param is named authHeader, NOT authorization -- AUTHORIZATION
