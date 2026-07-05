@@ -254,9 +254,15 @@ ord_mult):
 run, wait, move, yield_pct, tool, fsm_type, cmtindx):
 
 ```
-"MPI" "PUMP-ASSY-100" 10 "MACHINE" "Rough Machining" "MC01" "M1" ? ? 1.5 0.25 0.1 0.05 98 "T-100" " " 100
-"MPI" "PUMP-ASSY-100" 20 "ASSEMBLE" "Final Assembly" "AS01" "A1" ? ? 0.5 0.1 0 0 100 "" " " 0
+"MPI" "PUMP-ASSY-100" 10 "MACHINE" "Rough Machining" "MC01" "M1" ? ? 1.5 0.25 0.1 0.05 98 "T-100" "" 100
+"MPI" "PUMP-ASSY-100" 20 "ASSEMBLE" "Final Assembly" "AS01" "A1" ? ? 0.5 0.1 0 0 100 "" "" 0
 ```
+
+> **SOL-174:** `ro_fsm_type` is `""` (empty) for both ops — a NORMAL operation.
+> Progress has no null, so an unpopulated character field is zero-length `""`,
+> not a space; the route engine keeps rows where `TRIM(ro_fsm_type) = ""` and
+> excludes any non-blank FSM/subcontract type. (An earlier draft seeded `" "` to
+> match the pre-SOL-174 `<> " "` filter; real MPI normal rows carry `""`.)
 
 `wc_mstr.d` (domain, wkctr, mch, desc):
 

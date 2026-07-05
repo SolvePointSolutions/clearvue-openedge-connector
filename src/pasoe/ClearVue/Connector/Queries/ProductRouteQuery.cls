@@ -219,9 +219,15 @@ CLASS ClearVue.Connector.Queries.ProductRouteQuery:
               AND bRo.ro_routing = pcRouting
             BY bRo.ro_op:
 
-            /* skip feature/option (configured-product) routing rows, per the
-               legacy xx-rorp.p guard. */
-            IF bRo.ro_fsm_type <> " ":U THEN
+            /* Skip feature/option (configured-product / subcontract) routing
+               rows; keep NORMAL operations. SOL-174: the legacy xx-rorp.p guard
+               compared to " " (a single space), but Progress has no null -- an
+               unpopulated CHARACTER field is zero-length "", not a space. Normal
+               rows carry ro_fsm_type = "", so "<> ' '" matched nothing and
+               silently dropped EVERY normal operation. Test the TRIMmed value
+               against "" so a blank stored as either "" or a stray space counts
+               as normal, while any real FSM type code (non-blank) is excluded. */
+            IF TRIM(bRo.ro_fsm_type) <> "":U THEN
                 NEXT.
 
             iSeq = iSeq + 1.
