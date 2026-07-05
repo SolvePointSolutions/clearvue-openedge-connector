@@ -48,5 +48,21 @@
     </prgs:operation>
   </prgs:resource>
 
-  <!-- /product-route, /product-cover-sheet added when those endpoints are built. -->
+  <!-- GET /product-route?partNumber=&facility=&correlationId=  (+ Authorization header)
+       Business vocabulary, aligned with /product-structure (Rod, 2026-07-05):
+       `facility` = the EXTERNAL facility code (mapped to the MFG/PRO site in the .p);
+       `domain` is NOT a param (config). Standalone route shape (omits PiecesPerHour
+       and WorkCenterDescription -- those are cover-sheet only). -->
+  <prgs:resource consumes="application/json" name="_productroute" path="/product-route" produces="application/json">
+    <prgs:operation name="GetProductRoute" verb="GET"
+                    consumes="application/json" produces="application/json"
+                    idls="ClearVue/Connector/Rest/GetProductRoute.pidl::com.progress.openedge.pdt.bpmbindings">
+      <prgs:param name="partNumber"    type="QUERY"/>
+      <prgs:param name="facility"      type="QUERY"/>
+      <prgs:param name="correlationId" type="QUERY"/>
+      <prgs:param name="authHeader" type="HEADER" headerName="Authorization"/>
+    </prgs:operation>
+  </prgs:resource>
+
+  <!-- /product-cover-sheet added when that endpoint is built. -->
 </prgs:model>

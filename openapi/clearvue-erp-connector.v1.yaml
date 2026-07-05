@@ -135,10 +135,16 @@ paths:
     get:
       tags: [lookups]
       operationId: getProductRoute
-      summary: Routing for a part at a site
+      summary: Routing (operation steps) for a part at a facility
+      description: >
+        Returns the routing operation steps for the part at the facility, in
+        operation-number order. 200 with an EMPTY array when the part exists but
+        has no routing; 404 only when the part does not exist in the ERP
+        (pt_mstr). The standalone route OMITS PiecesPerHour and
+        WorkCenterDescription (those are cover-sheet only).
       parameters:
-        - $ref: "#/components/parameters/Part"
-        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/PartNumber"
+        - $ref: "#/components/parameters/Facility"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
         "200":
