@@ -16,10 +16,18 @@
                     - SOL-119 bounded connect: the pure param-parsing seams
                       (ExtractBrokerEndpoint, HasParameter,
                       NormalizeParamFileText) behind the probe + -ct design.
+                    - SOL-174: RouteRules:IsNormalOperation -- the ro_fsm_type
+                      rule deciding which ro_det rows the route walk keeps.
+                      Behaviour-preserving pins, incl. the inherited
+                      unknown-is-not-normal case.
 
     DB-bound behavior (the BOM explosion against pt_mstr/ps_mstr/ptp_det, the
-    live reconnect, and latency) CANNOT be unit-tested off a connected MFG/PRO
-    schema -- those are the [LIVE-ONLY] steps in docs/deploy-and-run-11.6.md.
+    route walk over ro_det, the live reconnect, and latency) CANNOT be
+    unit-tested off a connected MFG/PRO schema -- those are the [LIVE-ONLY]
+    steps in docs/deploy-and-run-11.6.md. Note the SOL-174 tests below reach
+    RouteRules, NOT ProductRouteQuery: the query class buffers ro_det et al and
+    so cannot compile without a schema. Keep it that way -- referencing the
+    query class from here would make the whole unit suite need a database.
 
     Run: ablunit on this class from an OE 11.6 session with the connector src on
     PROPATH. (Cannot run on the dev macOS box -- no $DLC / no compiler.)
@@ -32,6 +40,7 @@ USING ClearVue.Connector.Web.ConnectorError.
 USING ClearVue.Connector.Web.ErrorClassifier.
 USING ClearVue.Connector.Json.JsonFormat.
 USING ClearVue.Connector.Data.DatabaseConnection.
+USING ClearVue.Connector.Queries.RouteRules.
 
 BLOCK-LEVEL ON ERROR UNDO, THROW.
 
@@ -357,6 +366,52 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
            not a bare ? (bare ? -> 11.6 error 5638). Still proves ? is unauthorized. */
         Assert:IsFalse(oAuth:IsAuthorizedHeader(STRING(?))).
         Assert:IsFalse(oAuth:IsAuthorizedHeader("Bearer anything":U)).
+    END METHOD.
+
+    /* ---- SOL-174: the ro_fsm_type normal-operation rule ---- */
+    /* These pin the rule the route walk applies to every ro_det row. They are
+       BEHAVIOUR-PRESERVING: each expectation is what the inline guard already
+       did, verified against the OpenEdge runtime before extraction. See the
+       SOL-174 note on RouteRules for why that ticket's stated defect was not
+       real -- ABL character comparison ignores trailing blanks, so the old
+       "<> ' '" guard kept blank rows just as this one does. */
+
+    /* Blank is a normal operation. "" is what a real unpopulated MFG/PRO
+       CHARACTER field holds; the spaces are covered because TRIM makes the
+       rule independent of how the blank was stored. */
+    @Test.
+    METHOD PUBLIC VOID IsNormalOperation_blank_is_a_normal_operation():
+        Assert:IsTrue(RouteRules:IsNormalOperation("":U)).
+        Assert:IsTrue(RouteRules:IsNormalOperation(" ":U)).
+        Assert:IsTrue(RouteRules:IsNormalOperation("   ":U)).
+    END METHOD.
+
+    /* The other half of the filter. A rule that simply kept every row would
+       pass the blanks above and still be wrong: feature/option and subcontract
+       rows must stay out of the route. The padded case guards the TRIM -- it
+       must not launder a real type code into a blank. */
+    @Test.
+    METHOD PUBLIC VOID IsNormalOperation_populated_fsm_type_is_excluded():
+        Assert:IsFalse(RouteRules:IsNormalOperation("S":U)).
+        Assert:IsFalse(RouteRules:IsNormalOperation("F":U)).
+        Assert:IsFalse(RouteRules:IsNormalOperation("O":U)).
+        Assert:IsFalse(RouteRules:IsNormalOperation("  S  ":U)).
+    END METHOD.
+
+    /* Unknown is NOT normal -- an unknown ro_fsm_type row is dropped from the
+       route. This pins INHERITED behaviour, not a preference: ABL evaluates
+       "? <> ''" as TRUE (unknown sorts below any value), so the inline guard
+       took its skip branch on unknown and always has.
+
+       NO BEHAVIOUR CHANGE. If this ever starts failing because unknown began
+       counting as normal, that is a deliberate decision landing and it needs
+       its own ticket -- update this fixture on purpose, do not relax it to
+       match whatever the code now does.
+
+       STRING(?) -- a typed unknown CHARACTER, not a bare ? (11.6 error 5638). */
+    @Test.
+    METHOD PUBLIC VOID IsNormalOperation_unknown_is_not_normal_inherited():
+        Assert:IsFalse(RouteRules:IsNormalOperation(STRING(?))).
     END METHOD.
 
 END CLASS.

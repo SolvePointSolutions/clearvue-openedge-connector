@@ -220,14 +220,12 @@ CLASS ClearVue.Connector.Queries.ProductRouteQuery:
             BY bRo.ro_op:
 
             /* Skip feature/option (configured-product / subcontract) routing
-               rows; keep NORMAL operations. SOL-174: the legacy xx-rorp.p guard
-               compared to " " (a single space), but Progress has no null -- an
-               unpopulated CHARACTER field is zero-length "", not a space. Normal
-               rows carry ro_fsm_type = "", so "<> ' '" matched nothing and
-               silently dropped EVERY normal operation. Test the TRIMmed value
-               against "" so a blank stored as either "" or a stray space counts
-               as normal, while any real FSM type code (non-blank) is excluded. */
-            IF TRIM(bRo.ro_fsm_type) <> "":U THEN
+               rows; keep NORMAL operations. The rule -- including the unknown
+               case and the SOL-174 history -- lives on
+               RouteRules:IsNormalOperation(), a schema-free class so ABLUnit
+               can pin it without a DB. Behaviour is unchanged from the inline
+               guard this replaced. */
+            IF NOT ClearVue.Connector.Queries.RouteRules:IsNormalOperation(bRo.ro_fsm_type) THEN
                 NEXT.
 
             iSeq = iSeq + 1.
