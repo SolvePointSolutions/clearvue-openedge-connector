@@ -258,11 +258,23 @@ run, wait, move, yield_pct, tool, fsm_type, cmtindx):
 "MPI" "PUMP-ASSY-100" 20 "ASSEMBLE" "Final Assembly" "AS01" "A1" ? ? 0.5 0.1 0 0 100 "" "" 0
 ```
 
-> **SOL-174:** `ro_fsm_type` is `""` (empty) for both ops — a NORMAL operation.
-> Progress has no null, so an unpopulated character field is zero-length `""`,
-> not a space; the route engine keeps rows where `TRIM(ro_fsm_type) = ""` and
-> excludes any non-blank FSM/subcontract type. (An earlier draft seeded `" "` to
-> match the pre-SOL-174 `<> " "` filter; real MPI normal rows carry `""`.)
+> **SOL-174 — the seed, and a correction to the record.** `ro_fsm_type` is
+> `""` (empty) for both ops, which is what a real unpopulated MFG/PRO character
+> field holds. The route engine keeps rows where `TRIM(ro_fsm_type) = ""` and
+> excludes any non-blank FSM/subcontract type.
+>
+> The parenthetical that used to close this note claimed seeding `""` instead of
+> `" "` "would have exposed this under the old filter." **It would not.** ABL
+> character comparison ignores trailing blanks, so `"" = " "` is TRUE and
+> `"" <> " "` is FALSE — the pre-SOL-174 guard `ro_fsm_type <> " "` kept blank
+> rows exactly as the current one does. Verified against the OpenEdge runtime:
+> old and new agree on `""`, `" "`, `"   "`, `"S"`, `"  S  "` and unknown. Only
+> `COMPARE(a, "EQ", b, "RAW")` distinguishes `""` from `" "`.
+>
+> Either seed value therefore yields the same 2 ops under either filter. The
+> fixture stays `""` because that mirrors real MPI — not because it
+> discriminates between the two implementations. See
+> `RouteRules:IsNormalOperation` for the full note.
 
 `wc_mstr.d` (domain, wkctr, mch, desc):
 
