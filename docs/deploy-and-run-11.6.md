@@ -94,7 +94,7 @@ The entry points are mapped `.p`'s, not handler classes:
    wire them in the REST editor):
    - `GET /health` → `ClearVue/Connector/Rest/GetHealth.p`
    - `GET /product-structure` → `ClearVue/Connector/Rest/GetProductStructure.p`, with
-     `part`/`site`/`correlationId` as QUERY params and the `Authorization` HEADER mapped to the
+     `partNumber`/`facility`/`correlationId` as QUERY params and the `Authorization` HEADER mapped to the
      `.p`'s `authHeader` input param. **Two distinct names, do not mix them up:** the ABL param is
      `authHeader` (the identifier `authorization` is a reserved ABL keyword on 11.6 and will not
      compile); the header value expression reads the real inbound header, i.e.
@@ -129,15 +129,15 @@ curl -s http://<host>:<port>/<webapp>/clearvue/erp/v1/health
 
 # product-structure (bearer required)
 curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
-  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=PUMP-ASSY-100&site=1000"
+  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?partNumber=PUMP-ASSY-100&facility=1000"
 # -> StructureComponent[] root row (Quantity 1) + children  (samples/product-structure.example.json)
 
 # A part that EXISTS but has no BOM -> 200 with ONLY the root row (NOT 404):
 curl -s -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
-  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=HOUSING-100&site=1000"
+  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?partNumber=HOUSING-100&facility=1000"
 # -> single root row  (samples/product-structure-no-bom.example.json)
 
-# 401 (no/blank bearer), 400 (missing part), 404 ONLY when the part is absent
+# 401 (no/blank bearer), 400 (missing partNumber/facility), 404 ONLY when the part is absent
 # from pt_mstr (genuinely not in the ERP) are the other paths.
 ```
 
@@ -177,7 +177,7 @@ representative parts (shallow + deep multi-level BOM):
 ```
 curl -s -o /dev/null -w "%{time_total}\n" \
   -H "Authorization: Bearer $CLEARVUE_CONNECTOR_API_KEY" \
-  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?part=<deep-bom>&site=<site>"
+  "http://<host>:<port>/<webapp>/clearvue/erp/v1/product-structure?partNumber=<deep-bom>&facility=<facility>"
 ```
 
 Budget (resilience-and-errors.md): connector total ≤ **7s**, target **5–7s** worst
@@ -193,7 +193,7 @@ case, with the cover sheet as the heavier follow-on. **RECORD MEASURED TIMES HER
 
 A no-MFG/PRO option to run the skeleton end-to-end today: build the synthetic
 test DB per `docs/test-db-setup.md`, connect it as `-ld qaddb`, and diff the
-`/product-structure?part=PUMP-ASSY-100&site=1000` response against
+`/product-structure?partNumber=PUMP-ASSY-100&facility=1000` response against
 `samples/product-structure.example.json`.
 
 ## 8. What still needs the live box

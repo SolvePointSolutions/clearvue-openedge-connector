@@ -33,9 +33,15 @@
     (see config/resourceModel.example.xml). PASOE may strip Authorization for
     Web handlers, but the classic REST adapter can map it to a CHARACTER param.
 
-    PARAMS (mapped in the REST resource):
-      part          QUERY   required
-      site          QUERY   required
+    PARAMS (mapped in the REST resource) -- ClearVue business vocabulary (SOL-51):
+      partNumber    QUERY   required -- the part identifier to look up.
+      facility      QUERY   required -- the EXTERNAL FACILITY CODE the ERP uses to
+                            identify the location (a string, e.g. "1000"); NOT a
+                            ClearVue facility Guid. This .p maps it to the MFG/PRO
+                            site internally (see the facility->site mapping below),
+                            so no ERP term crosses the wire. `domain` is NOT a
+                            param -- it is connector CONFIG (ConnectorConfig),
+                            never on the wire.
       correlationId QUERY   optional -- SOL-119: the connector GENERATES a
                             GUID when absent, echoes it in every Error body,
                             and keys the server-side raw-diagnostic log line
@@ -57,8 +63,11 @@ USING ClearVue.Connector.Web.ErrorClassifier.
 USING ClearVue.Connector.Logging.ConnectorLog.
 
 /* ---- mapped interface ---- */
-DEFINE INPUT  PARAMETER part          AS CHARACTER NO-UNDO.
-DEFINE INPUT  PARAMETER site          AS CHARACTER NO-UNDO.
+/* SOL-51: wire vocabulary is ClearVue business language -- `partNumber` and
+   `facility`. `facility` is the EXTERNAL facility code the ERP uses to identify
+   the location (a string, NOT a Guid); it is mapped to the MFG/PRO site below. */
+DEFINE INPUT  PARAMETER partNumber    AS CHARACTER NO-UNDO.
+DEFINE INPUT  PARAMETER facility      AS CHARACTER NO-UNDO.
 DEFINE INPUT  PARAMETER correlationId AS CHARACTER NO-UNDO.
 /* NB: the param is authHeader, NOT `authorization` -- AUTHORIZATION is a
    RESERVED ABL keyword on 11.6, so a param/variable named `authorization`
@@ -76,6 +85,10 @@ DEFINE VARIABLE oQuery      AS ProductStructureQuery       NO-UNDO.
 DEFINE VARIABLE oComposer   AS ProductStructureJsonComposer NO-UNDO.
 DEFINE VARIABLE iRows       AS INTEGER                     NO-UNDO.
 DEFINE VARIABLE oClassified AS ConnectorError              NO-UNDO.
+/* cSite: the MFG/PRO site the ERP query runs against. SOL-51 keeps the ERP term
+   ("site") INSIDE the connector -- the wire speaks `facility` (the external
+   facility code); this local is the internal ERP-vocabulary mapping target. */
+DEFINE VARIABLE cSite       AS CHARACTER                   NO-UNDO.
 
 /* ---- forward declarations (functions defined after the main block) ---- */
 FUNCTION RunWithReconnect RETURNS INTEGER
@@ -101,14 +114,23 @@ oAuth = NEW ApiKeyAuthenticator(oConfig).
 IF NOT oAuth:IsAuthorizedHeader(authHeader) THEN
     RETURN FailWith(WithCorr(ConnectorError:Unauthorized())).
 
-/* 2. validate params */
+/* 2. validate params (wire vocabulary: partNumber / facility) */
 ASSIGN
-    part = TRIM(part)
-    site = TRIM(site).
-IF part = "":U THEN
-    RETURN FailWith(WithCorr(ConnectorError:BadRequest("part is required":U))).
-IF site = "":U THEN
-    RETURN FailWith(WithCorr(ConnectorError:BadRequest("site is required":U))).
+    partNumber = TRIM(partNumber)
+    facility   = TRIM(facility).
+IF partNumber = "":U THEN
+    RETURN FailWith(WithCorr(ConnectorError:BadRequest("partNumber is required":U))).
+IF facility = "":U THEN
+    RETURN FailWith(WithCorr(ConnectorError:BadRequest("facility is required":U))).
+
+/* 2b. map the external facility code -> MFG/PRO site (SOL-51). The wire carries
+   the external facility code the ERP uses to identify the location; the ERP
+   query keys on the MFG/PRO site field. For QAD MFG/PRO the external facility
+   code IS the site value, so the mapping is a direct assignment -- kept explicit
+   here so the wire/ERP vocabulary boundary is visible and any future
+   facility->site translation has one home. `domain` is NOT taken from the wire;
+   ProductStructureQuery sources it from ConnectorConfig. */
+cSite = facility.
 
 /* 3. pre-flight the DB gate BEFORE instantiating the query class (SOL-119).
    ProductStructureQuery's r-code references the ERP schema (pt_mstr/ps_mstr/
@@ -120,9 +142,10 @@ IF site = "":U THEN
 oDb = NEW DatabaseConnection(oConfig).
 oDb:EnsureConnected().
 
-/* 4. run with one reconnect-and-retry on a mid-query disconnect */
+/* 4. run with one reconnect-and-retry on a mid-query disconnect. The query is
+   keyed by partNumber + the internally-mapped MFG/PRO site (cSite). */
 oQuery = NEW ProductStructureQuery(oConfig, oDb).
-iRows  = RunWithReconnect(oQuery, oDb, part, site).
+iRows  = RunWithReconnect(oQuery, oDb, partNumber, cSite).
 
 /* 5. 0 rows -> 404 (part NOT in pt_mstr -- genuinely not found in the ERP).
       A part that exists but has no BOM returns >=1 row (the root row) and 200,
@@ -130,7 +153,7 @@ iRows  = RunWithReconnect(oQuery, oDb, part, site).
 IF iRows = 0 THEN
     RETURN FailWith(WithCorr(
         ConnectorError:NotFound(
-            SUBSTITUTE("part &1 not found in ERP for site &2":U, part, site)))).
+            SUBSTITUTE("part &1 not found in ERP for facility &2":U, partNumber, facility)))).
 
 /* part exists -> 200 with the root row (plus children if any) */
 oComposer    = NEW ProductStructureJsonComposer().

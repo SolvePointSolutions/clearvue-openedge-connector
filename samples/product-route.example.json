@@ -1,0 +1,32 @@
+[
+  {
+    "OperationNumber": "10",
+    "StandardOperation": "MACHINE",
+    "Description": "Rough Machining",
+    "WorkCenterId": "MC01",
+    "Machine": "M1",
+    "StartDate": null,
+    "EndDate": null,
+    "SetupHours": 1.5,
+    "RunHoursPerPiece": 0.25,
+    "Wait": 0.1,
+    "Move": 0.05,
+    "YieldPercent": 98,
+    "Tool": "T-100"
+  },
+  {
+    "OperationNumber": "20",
+    "StandardOperation": "ASSEMBLE",
+    "Description": "Final Assembly",
+    "WorkCenterId": "AS01",
+    "Machine": "A1",
+    "StartDate": null,
+    "EndDate": null,
+    "SetupHours": 0.5,
+    "RunHoursPerPiece": 0.1,
+    "Wait": 0,
+    "Move": 0,
+    "YieldPercent": 100,
+    "Tool": null
+  }
+]

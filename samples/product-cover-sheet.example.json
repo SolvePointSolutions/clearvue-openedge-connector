@@ -1,0 +1,107 @@
+{
+  "PartNumber": "PUMP-ASSY-100",
+  "Header": {
+    "ShipTo": "ACME01",
+    "ShipName": "Acme Manufacturing Co",
+    "PartNumber": "PUMP-ASSY-100",
+    "AltPartNumber": "DRW-100-A",
+    "Revision": "B",
+    "Description": "Centrifugal Pump Assembly",
+    "Bom": null,
+    "CustItem": "ACME-PUMP-X",
+    "RouteCode": "PUMP-ASSY-100",
+    "QtyPallet": "48",
+    "Note1": null,
+    "Note2": null,
+    "Note3": null,
+    "Note4": null,
+    "Note5": null,
+    "Note6": null,
+    "Note7": null,
+    "Note8": null,
+    "Note9": null,
+    "Note10": null
+  },
+  "Structure": [
+    {
+      "Level": "Parent",
+      "PartNumber": "PUMP-ASSY-100",
+      "Reference": null,
+      "AltPartNumber": "DRW-100-A",
+      "Revision": "B",
+      "Description": "Centrifugal Pump Assembly",
+      "Quantity": 1,
+      "UnitOfMeasure": "EA"
+    },
+    {
+      "Level": "1",
+      "PartNumber": "HOUSING-100",
+      "Reference": "010",
+      "AltPartNumber": "DRW-100-H",
+      "Revision": "A",
+      "Description": "Pump Housing, Cast",
+      "Quantity": 1,
+      "UnitOfMeasure": "EA"
+    },
+    {
+      "Level": "1",
+      "PartNumber": "IMPELLER-50",
+      "Reference": "020",
+      "AltPartNumber": null,
+      "Revision": "C",
+      "Description": "Impeller, 50mm",
+      "Quantity": 1,
+      "UnitOfMeasure": "EA"
+    },
+    {
+      "Level": ".2",
+      "PartNumber": "GASKET-KIT",
+      "Reference": "030",
+      "AltPartNumber": null,
+      "Revision": null,
+      "Description": "Item not in inventory",
+      "Quantity": 2.5,
+      "UnitOfMeasure": null
+    }
+  ],
+  "Route": [
+    {
+      "OperationNumber": "10",
+      "StandardOperation": "MACHINE",
+      "Description": "Rough Machining",
+      "WorkCenterId": "MC01",
+      "Machine": "M1",
+      "StartDate": null,
+      "EndDate": null,
+      "SetupHours": 1.5,
+      "RunHoursPerPiece": 0.25,
+      "Wait": 0.1,
+      "Move": 0.05,
+      "YieldPercent": 98,
+      "Tool": "T-100",
+      "PiecesPerHour": 4,
+      "WorkCenterDescription": "Machining Cell 1"
+    },
+    {
+      "OperationNumber": "20",
+      "StandardOperation": "ASSEMBLE",
+      "Description": "Final Assembly",
+      "WorkCenterId": "AS01",
+      "Machine": "A1",
+      "StartDate": null,
+      "EndDate": null,
+      "SetupHours": 0.5,
+      "RunHoursPerPiece": 0.1,
+      "Wait": 0,
+      "Move": 0,
+      "YieldPercent": 100,
+      "Tool": null,
+      "PiecesPerHour": 10,
+      "WorkCenterDescription": "Assembly Line 1"
+    }
+  ],
+  "Comments": [
+    "Deburr all edges",
+    "Inspect per QA-17"
+  ]
+}

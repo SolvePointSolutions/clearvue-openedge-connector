@@ -22,6 +22,13 @@
 #     so stock output == SaaS model == identity.
 #   - Domain is CONNECTOR CONFIGURATION, not a request param (one connector instance
 #     serves one ERP domain). Legacy hardcoded "MPI"; here it's configured, not passed.
+#     It is NEVER on the wire.
+#   - Query params use ClearVue BUSINESS vocabulary, not ERP vocabulary (SOL-51):
+#     `partNumber` (the part identifier) and `facility`. `facility` carries the
+#     EXTERNAL FACILITY CODE the ERP uses to identify the location (a string, e.g.
+#     "1000") — NOT a ClearVue facility Guid. The connector maps that external
+#     facility code to the MFG/PRO site internally, so no ERP term ("site") crosses
+#     the wire. See docs/contract-vocabulary.md.
 #   - Auth is an ENFORCED header (legacy used an unenforced query param).
 #   - `Reference` (the legacy cover-sheet "Refinance" typo is fixed).
 #   - Structured ERROR model (code + category + retryable + correlationId + safe diagnostic)
@@ -80,7 +87,7 @@ paths:
     get:
       tags: [lookups]
       operationId: getProductStructure
-      summary: Product structure (BOM) for a part at a site
+      summary: Product structure (BOM) for a part at a facility
       description: >
         Returns the requested part as a root ("Parent") row followed by its
         exploded BOM components. The root row is ALWAYS present when the part
@@ -90,8 +97,8 @@ paths:
         not exist in the ERP. The root row's Quantity is 1 by convention (the
         root has no quantity-per-parent; 1 keeps column arithmetic safe).
       parameters:
-        - $ref: "#/components/parameters/Part"
-        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/PartNumber"
+        - $ref: "#/components/parameters/Facility"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
         "200":
@@ -128,10 +135,16 @@ paths:
     get:
       tags: [lookups]
       operationId: getProductRoute
-      summary: Routing for a part at a site
+      summary: Routing (operation steps) for a part at a facility
+      description: >
+        Returns the routing operation steps for the part at the facility, in
+        operation-number order. 200 with an EMPTY array when the part exists but
+        has no routing; 404 only when the part does not exist in the ERP
+        (pt_mstr). The standalone route OMITS PiecesPerHour and
+        WorkCenterDescription (those are cover-sheet only).
       parameters:
-        - $ref: "#/components/parameters/Part"
-        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/PartNumber"
+        - $ref: "#/components/parameters/Facility"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
         "200":
@@ -158,8 +171,8 @@ paths:
         end-to-end on 11.6 first. The cover-sheet route rows carry two extra fields
         (PiecesPerHour, WorkCenterDescription) that the standalone route omits.
       parameters:
-        - $ref: "#/components/parameters/Part"
-        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/PartNumber"
+        - $ref: "#/components/parameters/Facility"
         - $ref: "#/components/parameters/CorrelationId"
       responses:
         "200":
@@ -187,18 +200,27 @@ components:
         adaptor used an unenforced query-string key — not carried forward.)
 
   parameters:
-    Part:
-      name: part
+    # ClearVue business-vocabulary params (SOL-51) — used by /product-structure.
+    PartNumber:
+      name: partNumber
       in: query
       required: true
-      description: ERP part number.
+      description: The part identifier — the part number to look up in the ERP.
       schema: { type: string, maxLength: 50 }
-    Site:
-      name: site
+    Facility:
+      name: facility
       in: query
       required: true
-      description: ERP site / plant number.
+      description: >
+        The EXTERNAL FACILITY CODE the ERP uses to identify the location — a string
+        code (e.g. "1000"). This is NOT a ClearVue facility Guid; it is the code the
+        target ERP recognizes for the location. The connector maps this facility code
+        to the MFG/PRO site internally, so no ERP-specific term crosses the wire.
       schema: { type: string, maxLength: 20 }
+    # Legacy ERP-vocabulary params (part / site) RETIRED 2026-07-05: all three
+    # lookups now use the business vocabulary partNumber + facility above. The
+    # ERP terms ("site") stay INSIDE the connector (facility -> site mapping in
+    # each .p). See docs/contract-vocabulary.md.
     CorrelationId:
       name: correlationId
       in: query
@@ -216,7 +238,7 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
-          example: { code: BAD_REQUEST, category: REQUEST, retryable: false, message: "part is required" }
+          example: { code: BAD_REQUEST, category: REQUEST, retryable: false, message: "partNumber is required" }
     Unauthorized:
       description: Missing/invalid credentials (401)
       content:
@@ -231,7 +253,7 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
-          example: { code: NOT_FOUND, category: DATA, retryable: false, message: "part PUMP-XYZ not found in ERP for site 1000" }
+          example: { code: NOT_FOUND, category: DATA, retryable: false, message: "part PUMP-XYZ not found in ERP for facility 1000" }
     ErpUnavailable:
       description: >
         ERP database unreachable — transient (503, retryable). `code` is `ERP_DISCONNECTED`
@@ -363,6 +385,11 @@ components:
 
     CoverSheetHeader:
       type: object
+      description: >
+        Cover-sheet header. NOTE (SOL-173): Note1..Note10 are UNPOPULATED in v1 --
+        the connector always emits null for them (no ERP notes source is wired
+        yet). Read a null Note as "notes source not yet wired", not as "no notes
+        present". Every other field is populated from live MFG/PRO joins.
       properties:
         ShipTo:         { type: string }
         ShipName:       { type: string }
@@ -374,16 +401,23 @@ components:
         CustItem:       { type: string }
         RouteCode:      { type: string }
         QtyPallet:      { type: string }
-        Note1:  { type: string, nullable: true }
-        Note2:  { type: string, nullable: true }
-        Note3:  { type: string, nullable: true }
-        Note4:  { type: string, nullable: true }
-        Note5:  { type: string, nullable: true }
-        Note6:  { type: string, nullable: true }
-        Note7:  { type: string, nullable: true }
-        Note8:  { type: string, nullable: true }
-        Note9:  { type: string, nullable: true }
-        Note10: { type: string, nullable: true }
+        # SOL-173: Note1..Note10 are UNPOPULATED in v1 -- the connector always
+        # emits null for them because no ERP notes source is wired yet (the
+        # legacy source, chkCust/t-shp, was a dead prdlist.prn file import).
+        # A consumer MUST read null here as "notes source not yet wired", NOT as
+        # "this cover sheet has no notes". When a real source lands, these will
+        # start carrying text without a contract change (they are already
+        # nullable strings). The description is shared via a YAML anchor.
+        Note1:  { type: string, nullable: true, description: &noteUnpopulated "UNPOPULATED in v1 -- always null; no ERP notes source is wired yet (SOL-173). Treat null as 'notes source not yet wired', NOT as 'no notes present'." }
+        Note2:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note3:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note4:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note5:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note6:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note7:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note8:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note9:  { type: string, nullable: true, description: *noteUnpopulated }
+        Note10: { type: string, nullable: true, description: *noteUnpopulated }
 
     CoverSheet:
       type: object
