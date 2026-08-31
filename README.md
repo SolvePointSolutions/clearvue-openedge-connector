@@ -43,7 +43,8 @@ src/pasoe/ The OpenEdge 11.6 / PASOE web application
            ClearVue/Connector/{Query,Data,Security,Config,Json,Web}/  OOABL logic (ClearVue.Connector.*)
            config/  REST resource mapping + .pf + env templates (*.example only)
 tests/     ABLUnit tests for the connector's pure (non-DB) logic
-docs/      Design notes: 11.6 feasibility envelope, resilience/errors, deploy-and-run, test-db setup
+docs/      Design notes: 11.6 feasibility envelope, resilience/errors, deploy-and-run, test-db setup,
+           packaging & release
 samples/   Example responses (*.example.json only; no customer data committed)
 ```
 
@@ -55,6 +56,11 @@ OOABL logic classes — see the Binding-Model Correction in
 See [docs/deploy-and-run-11.6.md](docs/deploy-and-run-11.6.md) to compile, deploy,
 and run it on a real OpenEdge 11.6 / PASOE box, and to prove the open items
 (auto-reconnect on a DB restart and end-to-end latency).
+
+That procedure is **manual today**. How it becomes a scripted, reproducible build the
+customer runs — and why this connector is deliberately *not* signed or shipped as a
+prebuilt binary the way the .NET agent is — is recorded in
+[docs/packaging-and-release.md](docs/packaging-and-release.md) (SOL-1003).
 
 ## A note on QAD intellectual property
 
