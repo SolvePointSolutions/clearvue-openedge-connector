@@ -31,8 +31,9 @@
     cp_comment". That fallback is LIVE legacy code. An earlier version of this
     header filed it under the dead paths below, which was wrong. It is ported
     verbatim: cp_comment is free text, so no TRIM and no numeric check. The
-    rule, and the two cases still pending a ruling (no matched customer; no
-    site record), live on CoverSheetRules:ResolveQtyPallet.
+    rule lives on CoverSheetRules:ResolveQtyPallet, with its two blank cases:
+    no matched customer (ruled 2026-10-22, SOL-1736 1b: blank, not the
+    legacy "0") and no site record (known-temporary until SOL-1737).
 
     NOT PORTED (dead legacy paths -- flagged, emit null/blank):
       - The PQ.txt and prdlist.prn file imports, and the t-pallet / t-pick
@@ -233,7 +234,7 @@ CLASS ClearVue.Connector.Queries.ProductCoverSheetQuery:
                         OUTPUT lCustMatched, OUTPUT cCustComment).
 
         /* QtyPallet: ptp_ord_mult, or -- when that is 0 -- the matched customer
-           part's comment (SOL-1736). The rule and its pending cases are on
+           part's comment (SOL-1736). The rule and its blank cases are on
            CoverSheetRules:ResolveQtyPallet. */
         cQtyPallet = CoverSheetRules:ResolveQtyPallet(INPUT lSiteFound,
                                                       INPUT dOrderMultiple,

@@ -21,8 +21,9 @@
                       Behaviour-preserving pins, incl. the inherited
                       unknown-is-not-normal case.
                     - SOL-1736: CoverSheetRules:ResolveQtyPallet -- ptp_ord_mult,
-                      else the matched customer part's cp_comment (verbatim),
-                      plus pins for the two cases still pending a ruling.
+                      else the matched customer part's cp_comment (verbatim);
+                      the ruled 1b blank, and the no-site-record baseline
+                      that SOL-1737 will change.
 
     DB-bound behavior (the BOM explosion against pt_mstr/ps_mstr/ptp_det, the
     route walk over ro_det, the live reconnect, and latency) CANNOT be
@@ -483,12 +484,10 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
        comment passed in is non-blank on purpose -- with no matched customer
        it must never surface, whatever its value.
 
-       NO BEHAVIOUR CHANGE. Blank is what the connector has always emitted for
-       this case, and 1b is open for a ruling. If this starts failing because
-       the rule now returns "0", that is the 1b ruling landing -- update this
-       fixture deliberately; do not relax it to match whatever the code does. */
+       Ruled 2026-10-22 (SOL-1736 1b): blank, not the legacy '0'. Do not
+       change it to '0' without a new ruling. */
     @Test.
-    METHOD PUBLIC VOID QtyPallet_zero_ord_mult_no_matched_customer_is_blank_pending_1b():
+    METHOD PUBLIC VOID QtyPallet_zero_ord_mult_no_matched_customer_is_blank_ruled_1b():
         Assert:Equals(0, LENGTH(CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, FALSE, "99":U))).
         Assert:Equals(0, LENGTH(CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, FALSE, "":U))).
     END METHOD.
@@ -497,13 +496,13 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
        the fallback does NOT fire even with a matched customer: with no
        item-site row there is no ord_mult to be 0.
 
-       NO BEHAVIOUR CHANGE. The legacy builds no cover sheet at all here; the
-       connector builds one with QtyPallet blank, as it always has. Whether to
-       follow the legacy is SOL-1736 item 6, open for a ruling. If this starts
-       failing because the fallback began firing without a site record, that
-       is a decision landing -- update this fixture deliberately. */
+       The legacy builds no cover sheet at all here; the connector builds one
+       with QtyPallet blank, as it always has.
+
+       Known-temporary: SOL-1737 will change this to a not-found or a flag.
+       When that lands, update this fixture deliberately; do not relax it. */
     @Test.
-    METHOD PUBLIC VOID QtyPallet_no_site_record_is_blank_pending_item_6():
+    METHOD PUBLIC VOID QtyPallet_no_site_record_is_blank_until_sol_1737():
         Assert:Equals(0, LENGTH(CoverSheetRules:ResolveQtyPallet(FALSE, 0.0, TRUE, "36":U))).
     END METHOD.
 

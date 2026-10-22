@@ -46,14 +46,16 @@ CLASS ClearVue.Connector.Queries.CoverSheetRules:
        blank comment comes back blank, which the composer emits as JSON null.
 
        1b -- ord_mult 0 and NO matched customer. The legacy leaves the string
-       "0" here. The connector returns blank (JSON null), as it always has.
-       That is kept pending a ruling (SOL-1736 1b). If the ruling is to print
-       "0", the last RETURN below is the one line that changes.
+       "0" here. The connector returns blank (JSON null; ClearVue shows a dash),
+       as it always has. RULED 2026-10-22 (SOL-1736 1b): blank stays, not the
+       legacy "0". Do not change it to "0" without a new ruling.
 
        NO SITE RECORD. The legacy builds no cover sheet at all when the part
-       has no ptp_det row for the site (SOL-1736 item 6, not yet ruled). The
-       connector still builds one, with QtyPallet blank, and the fallback does
-       NOT fire: with no item-site row there is no ord_mult to be 0.
+       has no ptp_det row for the site. The connector still builds one, with
+       QtyPallet blank, and the fallback does NOT fire: with no item-site row
+       there is no ord_mult to be 0. KNOWN-TEMPORARY: SOL-1737 (after cutover)
+       will make this case a not-found or a flag. Until then this behaviour
+       stays.
 
        UNKNOWN ord_mult is not 0 (ABL: "? <> 0" is TRUE), so the fallback does
        not fire. That matches the legacy, where STRING(?) never equals "0", and
@@ -75,7 +77,7 @@ CLASS ClearVue.Connector.Queries.CoverSheetRules:
         IF plCustomerMatched = TRUE THEN
             RETURN pcCustomerComment.
 
-        /* 1b: the legacy prints "0" here -- blank kept pending a ruling */
+        /* 1b: the legacy prints "0" here -- blank by ruling (SOL-1736 1b) */
         RETURN "":U.
     END METHOD.
 

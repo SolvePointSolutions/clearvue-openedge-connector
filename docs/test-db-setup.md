@@ -323,8 +323,8 @@ run, wait, move, yield_pct, tool, fsm_type, cmtindx):
 >   the comment from the first `cp_mstr` row instead of the matched one would
 >   return `"99"`.
 > - `BRACKET-20`: multiple 0, and its only customer part matches no `cm_mstr` →
->   QtyPallet `null` (the legacy prints `"0"` here — SOL-1736 1b, pending a
->   ruling). The comment `"77"` must not surface.
+>   QtyPallet `null` (the legacy prints `"0"` here; ruled 2026-10-22,
+>   SOL-1736 1b: blank, not `"0"`). The comment `"77"` must not surface.
 
 `cm_mstr.d` (domain, addr) — first 7 chars must match `cp_cust`:
 
@@ -354,7 +354,7 @@ run, wait, move, yield_pct, tool, fsm_type, cmtindx):
 | Cover sheet — not found | `GET /product-cover-sheet?partNumber=NOPE-999&facility=1000` | 404 |
 | Cover sheet — QtyPallet, multiple non-zero (SOL-1736) | `GET /product-cover-sheet?partNumber=PUMP-ASSY-100&facility=1000` | 200, `Header.QtyPallet` = `"48"` (the multiple, not the comment `"12"`) |
 | Cover sheet — QtyPallet, multiple 0 + matched customer | `GET /product-cover-sheet?partNumber=IMPELLER-50&facility=1000` | 200, `Header.QtyPallet` = `"36"` (the matched record's comment, not `"99"`) |
-| Cover sheet — QtyPallet, multiple 0 + no matched customer | `GET /product-cover-sheet?partNumber=BRACKET-20&facility=1000` | 200, `Header.QtyPallet` = `null` (SOL-1736 1b pending) |
+| Cover sheet — QtyPallet, multiple 0 + no matched customer | `GET /product-cover-sheet?partNumber=BRACKET-20&facility=1000` | 200, `Header.QtyPallet` = `null` (ruled, SOL-1736 1b) |
 | **SOL-119 DB down** | any lookup with the DB/broker stopped | **503**, `code: ERP_UNAVAILABLE`\|`ERP_DISCONNECTED`, `retryable: true`, `category: ERP_CONNECTIVITY`, `correlationId` present, **no** db/class/OE-number leakage (raw detail in the agent log under subsystem `CVERR`, keyed by correlationId); returns within the ~6s budget; recovers with no PASOE bounce after restart |
 
 Drive all of these with [`test/smoke/route-coversheet-smoke.sh`](../test/smoke/route-coversheet-smoke.sh)

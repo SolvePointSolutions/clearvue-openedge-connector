@@ -33,7 +33,7 @@
 #   PALLETCMT         multiple 0 + a matched customer part    (default IMPELLER-50)
 #   PALLETCMT_WANT    -> that customer part's comment         (default "36")
 #   PALLETNONE        multiple 0 + NO matched customer part   (default BRACKET-20)
-#   PALLETNONE_WANT   -> blank, emitted as null (1b pending)  (default null)
+#   PALLETNONE_WANT   -> blank, emitted as null (1b, ruled)   (default null)
 
 set -u
 
