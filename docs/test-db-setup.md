@@ -209,11 +209,13 @@ ADD FIELD "cp_domain"    OF "cp_mstr" AS character ORDER 10
 ADD FIELD "cp_part"      OF "cp_mstr" AS character ORDER 20
 ADD FIELD "cp_cust"      OF "cp_mstr" AS character ORDER 30
 ADD FIELD "cp_cust_part" OF "cp_mstr" AS character ORDER 40
+ADD FIELD "cp_comment"   OF "cp_mstr" AS character ORDER 50
 ADD INDEX "cp_part" ON "cp_mstr"
   AREA "TestIndex"
   PRIMARY
   INDEX-FIELD "cp_domain" ASCENDING
   INDEX-FIELD "cp_part" ASCENDING
+  INDEX-FIELD "cp_cust" ASCENDING
 
 ADD TABLE "cm_mstr"
   AREA "TestData"
@@ -248,6 +250,16 @@ ord_mult):
 ```
 "MPI" "PUMP-ASSY-100" "1000" "" "PUMP-ASSY-100" 48
 "MPI" "IMPELLER-50" "1000" "" "" 0
+"MPI" "BRACKET-20" "1000" "" "" 0
+```
+
+`pt_mstr.d` — **append** one part, `BRACKET-20`, used only by the SOL-1736
+QtyPallet case "pallet multiple 0, no matched customer" (field order: domain,
+part, desc1, rev, um, draw, bom_code). It is in no `ps_mstr` row, so the
+structure samples are unchanged:
+
+```
+"MPI" "BRACKET-20" "Mounting Bracket" "A" "EA" "" ""
 ```
 
 `ro_det.d` (domain, routing, op, std_op, desc, wkctr, mch, start, end, setup,
@@ -289,11 +301,30 @@ run, wait, move, yield_pct, tool, fsm_type, cmtindx):
 "MPI" 100 "Deburr all edges" "Inspect per QA-17" "" "" "" "" "" "" "" "" "" "" "" "" ""
 ```
 
-`cp_mstr.d` (domain, part, cust, cust_part):
+`cp_mstr.d` (domain, part, cust, cust_part, comment):
 
 ```
-"MPI" "PUMP-ASSY-100" "ACME01" "ACME-PUMP-X"
+"MPI" "PUMP-ASSY-100" "ACME01" "ACME-PUMP-X" "12"
+"MPI" "IMPELLER-50" "AAA-NOMATCH" "AAA-IMP-50" "99"
+"MPI" "IMPELLER-50" "ACME01" "ACME-IMP-50" "36"
+"MPI" "BRACKET-20" "ZZZ-NOMATCH" "ZZZ-BRK-20" "77"
 ```
+
+> **SOL-1736 — the QtyPallet fallback, and what each row pins.** The cover
+> sheet's QtyPallet is `ptp_ord_mult`; when that is 0 it is the `cp_comment` of
+> the **same** `cp_mstr` record that supplies ShipTo / CustItem — the first one
+> whose customer matches a `cm_mstr` (legacy `xx-rprdcvr.p` cploop). The
+> `cp_cust` index field makes the loop order deterministic, so:
+>
+> - `PUMP-ASSY-100`: multiple 48 → QtyPallet `"48"`. Its comment `"12"` is
+>   non-blank so a fallback that overrode a non-zero multiple would show.
+> - `IMPELLER-50`: multiple 0 → QtyPallet `"36"`, ShipTo `ACME01`. The
+>   `AAA-NOMATCH` row sorts first and matches no `cm_mstr`; a lookup that took
+>   the comment from the first `cp_mstr` row instead of the matched one would
+>   return `"99"`.
+> - `BRACKET-20`: multiple 0, and its only customer part matches no `cm_mstr` →
+>   QtyPallet `null` (the legacy prints `"0"` here — SOL-1736 1b, pending a
+>   ruling). The comment `"77"` must not surface.
 
 `cm_mstr.d` (domain, addr) — first 7 chars must match `cp_cust`:
 
@@ -321,6 +352,9 @@ run, wait, move, yield_pct, tool, fsm_type, cmtindx):
 | Route — missing param | `GET /product-route?facility=1000` | 400, `code: BAD_REQUEST` |
 | Cover sheet | `GET /product-cover-sheet?partNumber=PUMP-ASSY-100&facility=1000` | 200, diff-equals [`product-cover-sheet.example.json`](../samples/product-cover-sheet.example.json) (header + reused structure + full-shape route + 2 comments) |
 | Cover sheet — not found | `GET /product-cover-sheet?partNumber=NOPE-999&facility=1000` | 404 |
+| Cover sheet — QtyPallet, multiple non-zero (SOL-1736) | `GET /product-cover-sheet?partNumber=PUMP-ASSY-100&facility=1000` | 200, `Header.QtyPallet` = `"48"` (the multiple, not the comment `"12"`) |
+| Cover sheet — QtyPallet, multiple 0 + matched customer | `GET /product-cover-sheet?partNumber=IMPELLER-50&facility=1000` | 200, `Header.QtyPallet` = `"36"` (the matched record's comment, not `"99"`) |
+| Cover sheet — QtyPallet, multiple 0 + no matched customer | `GET /product-cover-sheet?partNumber=BRACKET-20&facility=1000` | 200, `Header.QtyPallet` = `null` (SOL-1736 1b pending) |
 | **SOL-119 DB down** | any lookup with the DB/broker stopped | **503**, `code: ERP_UNAVAILABLE`\|`ERP_DISCONNECTED`, `retryable: true`, `category: ERP_CONNECTIVITY`, `correlationId` present, **no** db/class/OE-number leakage (raw detail in the agent log under subsystem `CVERR`, keyed by correlationId); returns within the ~6s budget; recovers with no PASOE bounce after restart |
 
 Drive all of these with [`test/smoke/route-coversheet-smoke.sh`](../test/smoke/route-coversheet-smoke.sh)
