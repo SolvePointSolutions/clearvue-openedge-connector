@@ -22,12 +22,26 @@
 
     HEADER PORT (live joins only): pt_mstr (desc/rev/draw/bom-code) + ptp_det
     (routing/pallet-mult/site bom-code) + the customer chain
-    cp_mstr -> cm_mstr -> ad_mstr (shipto/shipname/customer-item).
+    cp_mstr -> cm_mstr -> ad_mstr (shipto/shipname/customer-item, plus the
+    matched customer part's comment for the QtyPallet fallback).
+
+    QTY/PALLET (SOL-1736): ptp_ord_mult when it is non-zero. When it is 0, the
+    cp_comment of the SAME cp_mstr record ResolveCustomer picks for ShipTo /
+    CustItem -- the legacy cploop's "IF pallet_qty = '0' THEN pallet_qty =
+    cp_comment". That fallback is LIVE legacy code. An earlier version of this
+    header filed it under the dead paths below, which was wrong. It is ported
+    verbatim: cp_comment is free text, so no TRIM and no numeric check. The
+    rule lives on CoverSheetRules:ResolveQtyPallet, with its two blank cases:
+    no matched customer (ruled 2026-10-22, SOL-1736 1b: blank, not the
+    legacy "0") and no site record (known-temporary until SOL-1737).
 
     NOT PORTED (dead legacy paths -- flagged, emit null/blank):
-      - QtyPallet fallback from the PQ.txt / prdlist.prn file imports and the
-        t-pallet / t-pick temp-tables: all commented out in the legacy. We use
-        ptp_ord_mult only; QtyPallet is blank when that is 0/absent.
+      - The PQ.txt and prdlist.prn file imports, and the t-pallet / t-pick
+        temp-tables they filled. Both imports are commented out in the legacy,
+        so t-pallet's SECOND QtyPallet fallback (after the cp_comment one) and
+        chkCust's t-pick ShipTo/ShipName override can never fire. (An older
+        copy of the legacy program, from before the imports were commented
+        out, still has them live; the current copy is the reference.)
       - Note1..Note10 (SOL-173): the legacy sourced these from chkCust's t-shp,
         populated from a dead prdlist.prn import -- so they were effectively
         always blank. Emitted as null here (contract documents them UNPOPULATED,
@@ -46,6 +60,7 @@ USING ClearVue.Connector.Config.ConnectorConfig.
 USING ClearVue.Connector.Data.DatabaseConnection.
 USING ClearVue.Connector.Queries.ProductStructureQuery.
 USING ClearVue.Connector.Queries.ProductRouteQuery.
+USING ClearVue.Connector.Queries.CoverSheetRules.
 USING ClearVue.Connector.Web.ConnectorError.
 USING ClearVue.Connector.Web.ErrorClassifier.
 
@@ -177,6 +192,10 @@ CLASS ClearVue.Connector.Queries.ProductCoverSheetQuery:
         DEFINE VARIABLE cShipTo    AS CHARACTER NO-UNDO.
         DEFINE VARIABLE cShipName  AS CHARACTER NO-UNDO.
         DEFINE VARIABLE cCustItem  AS CHARACTER NO-UNDO.
+        DEFINE VARIABLE lSiteFound     AS LOGICAL   NO-UNDO.
+        DEFINE VARIABLE dOrderMultiple AS DECIMAL   NO-UNDO.
+        DEFINE VARIABLE lCustMatched   AS LOGICAL   NO-UNDO.
+        DEFINE VARIABLE cCustComment   AS CHARACTER NO-UNDO.
         DEFINE BUFFER bPt  FOR pt_mstr.
         DEFINE BUFFER bPtp FOR ptp_det.
 
@@ -201,15 +220,26 @@ CLASS ClearVue.Connector.Queries.ProductCoverSheetQuery:
               AND bPtp.ptp_site   = pcSite NO-ERROR.
         IF AVAILABLE bPtp THEN
         DO:
-            cRoute = bPtp.ptp_routing.
+            ASSIGN
+                lSiteFound     = TRUE
+                dOrderMultiple = bPtp.ptp_ord_mult
+                cRoute         = bPtp.ptp_routing.
             IF bPtp.ptp_bom_code <> "":U THEN
                 cBom = bPtp.ptp_bom_code.
-            IF bPtp.ptp_ord_mult <> 0 THEN
-                cQtyPallet = STRING(bPtp.ptp_ord_mult).
         END.
 
-        /* customer chain (shipto / shipname / customer item) */
-        ResolveCustomer(INPUT pcPart, OUTPUT cShipTo, OUTPUT cShipName, OUTPUT cCustItem).
+        /* customer chain (shipto / shipname / customer item), plus the
+           matched record's cp_comment for the QtyPallet fallback */
+        ResolveCustomer(INPUT pcPart, OUTPUT cShipTo, OUTPUT cShipName, OUTPUT cCustItem,
+                        OUTPUT lCustMatched, OUTPUT cCustComment).
+
+        /* QtyPallet: ptp_ord_mult, or -- when that is 0 -- the matched customer
+           part's comment (SOL-1736). The rule and its blank cases are on
+           CoverSheetRules:ResolveQtyPallet. */
+        cQtyPallet = CoverSheetRules:ResolveQtyPallet(INPUT lSiteFound,
+                                                      INPUT dOrderMultiple,
+                                                      INPUT lCustMatched,
+                                                      INPUT cCustComment).
 
         ASSIGN
             ttCoverHeader.Bom       = cBom
@@ -224,16 +254,26 @@ CLASS ClearVue.Connector.Queries.ProductCoverSheetQuery:
     END METHOD.
 
     /* cp_mstr -> cm_mstr (7-char address match) -> ad_mstr, per the legacy
-       cploop. First customer part wins. All optional -> blank when absent. */
-    METHOD PRIVATE VOID ResolveCustomer(INPUT  pcPart     AS CHARACTER,
-                                        OUTPUT pcShipTo    AS CHARACTER,
-                                        OUTPUT pcShipName  AS CHARACTER,
-                                        OUTPUT pcCustItem  AS CHARACTER):
+       cploop. First customer part wins. All optional -> blank when absent.
+
+       SOL-1736: also returns whether any record matched, and THAT record's
+       cp_comment (the QtyPallet fallback). Both are taken inside this one
+       loop, from the one bCp row that sets ShipTo / CustItem, so the
+       fallback can never come from a different customer-part record. A
+       separate cp_mstr lookup could: the first cp_mstr row for the part need
+       not be the one whose customer matches. */
+    METHOD PRIVATE VOID ResolveCustomer(INPUT  pcPart        AS CHARACTER,
+                                        OUTPUT pcShipTo      AS CHARACTER,
+                                        OUTPUT pcShipName    AS CHARACTER,
+                                        OUTPUT pcCustItem    AS CHARACTER,
+                                        OUTPUT plMatched     AS LOGICAL,
+                                        OUTPUT pcCustComment AS CHARACTER):
         DEFINE BUFFER bCp FOR cp_mstr.
         DEFINE BUFFER bCm FOR cm_mstr.
         DEFINE BUFFER bAd FOR ad_mstr.
 
-        ASSIGN pcShipTo = "":U  pcShipName = "":U  pcCustItem = "":U.
+        ASSIGN pcShipTo = "":U  pcShipName = "":U  pcCustItem = "":U
+               plMatched = FALSE  pcCustComment = "":U.
 
         cploop:
         FOR EACH bCp NO-LOCK
@@ -246,8 +286,11 @@ CLASS ClearVue.Connector.Queries.ProductCoverSheetQuery:
             IF NOT AVAILABLE bCm THEN
                 NEXT cploop.
 
-            pcShipTo   = bCp.cp_cust.
-            pcCustItem = bCp.cp_cust_part.
+            ASSIGN
+                plMatched     = TRUE
+                pcShipTo      = bCp.cp_cust
+                pcCustItem    = bCp.cp_cust_part
+                pcCustComment = bCp.cp_comment.
 
             FIND FIRST bAd NO-LOCK
                 WHERE bAd.ad_domain = cDomain

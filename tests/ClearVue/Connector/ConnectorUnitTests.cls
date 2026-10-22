@@ -20,6 +20,10 @@
                       rule deciding which ro_det rows the route walk keeps.
                       Behaviour-preserving pins, incl. the inherited
                       unknown-is-not-normal case.
+                    - SOL-1736: CoverSheetRules:ResolveQtyPallet -- ptp_ord_mult,
+                      else the matched customer part's cp_comment (verbatim);
+                      the ruled 1b blank, and the no-site-record baseline
+                      that SOL-1737 will change.
 
     DB-bound behavior (the BOM explosion against pt_mstr/ps_mstr/ptp_det, the
     route walk over ro_det, the live reconnect, and latency) CANNOT be
@@ -28,6 +32,8 @@
     RouteRules, NOT ProductRouteQuery: the query class buffers ro_det et al and
     so cannot compile without a schema. Keep it that way -- referencing the
     query class from here would make the whole unit suite need a database.
+    The SOL-1736 tests reach CoverSheetRules, never ProductCoverSheetQuery, for
+    the same reason.
 
     Run: ablunit on this class from an OE 11.6 session with the connector src on
     PROPATH. (Cannot run on the dev macOS box -- no $DLC / no compiler.)
@@ -41,6 +47,7 @@ USING ClearVue.Connector.Web.ErrorClassifier.
 USING ClearVue.Connector.Json.JsonFormat.
 USING ClearVue.Connector.Data.DatabaseConnection.
 USING ClearVue.Connector.Queries.RouteRules.
+USING ClearVue.Connector.Queries.CoverSheetRules.
 
 BLOCK-LEVEL ON ERROR UNDO, THROW.
 
@@ -412,6 +419,91 @@ CLASS ClearVue.Connector.ConnectorUnitTests:
     @Test.
     METHOD PUBLIC VOID IsNormalOperation_unknown_is_not_normal_inherited():
         Assert:IsFalse(RouteRules:IsNormalOperation(STRING(?))).
+    END METHOD.
+
+    /* ---- SOL-1736: the cover-sheet QtyPallet rule ---- */
+    /* These pin CoverSheetRules:ResolveQtyPallet, the value the cover-sheet
+       header emits as QtyPallet. The legacy xx-rprdcvr.p takes ptp_ord_mult
+       and, when that is 0, falls back to the cp_comment of the first cp_mstr
+       record whose customer matches a cm_mstr. WHICH record supplies the
+       comment is decided by the DB-bound ProductCoverSheetQuery:ResolveCustomer
+       and is pinned by test/smoke/route-coversheet-smoke.sh, not here. These
+       cover the rule applied to the values once they have been read.
+
+       Arguments: site record found, ptp_ord_mult, customer matched, the
+       matched record's cp_comment. Order-multiple literals are written as
+       decimals (48.0, 0.0) because the parameter is DECIMAL.
+
+       Empty results are asserted as LENGTH(...) = 0, not Equals("", ...):
+       ABL character comparison ignores trailing blanks, so Equals("", " ")
+       passes, and Equals would also not tell "" from a lone space. */
+
+    /* A non-zero pallet multiple is kept, whatever the customer record says.
+       The matched comment is deliberately non-blank and different, so a rule
+       that let the fallback override ord_mult fails here. */
+    @Test.
+    METHOD PUBLIC VOID QtyPallet_nonzero_ord_mult_is_kept():
+        Assert:Equals("48":U, CoverSheetRules:ResolveQtyPallet(TRUE, 48.0, TRUE, "12":U)).
+        Assert:Equals("48":U, CoverSheetRules:ResolveQtyPallet(TRUE, 48.0, FALSE, "":U)).
+    END METHOD.
+
+    /* THE fallback: ord_mult 0 and a matched customer -> that customer part's
+       comment. Before SOL-1736 the connector emitted blank here. */
+    @Test.
+    METHOD PUBLIC VOID QtyPallet_zero_ord_mult_with_matched_customer_uses_cp_comment():
+        Assert:Equals("36":U, CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, TRUE, "36":U)).
+    END METHOD.
+
+    /* Verbatim, because the legacy applied no TRIM and no numeric check, and
+       cp_comment is free text. Leading blanks are significant to "=", so the
+       Equals guards that side. Trailing blanks are invisible to "=", so the
+       LENGTH checks are what catch a right-TRIM. */
+    @Test.
+    METHOD PUBLIC VOID QtyPallet_cp_comment_is_returned_verbatim():
+        DEFINE VARIABLE cResult AS CHARACTER NO-UNDO.
+
+        /* non-numeric free text passes through untouched */
+        Assert:Equals("SEE PKG SPEC":U,
+            CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, TRUE, "SEE PKG SPEC":U)).
+        /* a comment that is itself "0" stays "0" -- it is not "no value" */
+        Assert:Equals("0":U, CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, TRUE, "0":U)).
+
+        cResult = CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, TRUE, "  36":U).
+        Assert:Equals("  36":U, cResult).
+        Assert:Equals(4, LENGTH(cResult)).
+
+        cResult = CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, TRUE, "36  ":U).
+        Assert:Equals(4, LENGTH(cResult)).
+
+        /* a blank comment is blank; the composer then emits JSON null */
+        Assert:Equals(0, LENGTH(CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, TRUE, "":U))).
+    END METHOD.
+
+    /* SOL-1736 1b: ord_mult 0 and NO matched customer -> blank. The legacy
+       prints the string "0" here; the connector emits blank (JSON null). The
+       comment passed in is non-blank on purpose -- with no matched customer
+       it must never surface, whatever its value.
+
+       Ruled 2026-10-22 (SOL-1736 1b): blank, not the legacy '0'. Do not
+       change it to '0' without a new ruling. */
+    @Test.
+    METHOD PUBLIC VOID QtyPallet_zero_ord_mult_no_matched_customer_is_blank_ruled_1b():
+        Assert:Equals(0, LENGTH(CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, FALSE, "99":U))).
+        Assert:Equals(0, LENGTH(CoverSheetRules:ResolveQtyPallet(TRUE, 0.0, FALSE, "":U))).
+    END METHOD.
+
+    /* No site record (no ptp_det for the part at the facility) -> blank, and
+       the fallback does NOT fire even with a matched customer: with no
+       item-site row there is no ord_mult to be 0.
+
+       The legacy builds no cover sheet at all here; the connector builds one
+       with QtyPallet blank, as it always has.
+
+       Known-temporary: SOL-1737 will change this to a not-found or a flag.
+       When that lands, update this fixture deliberately; do not relax it. */
+    @Test.
+    METHOD PUBLIC VOID QtyPallet_no_site_record_is_blank_until_sol_1737():
+        Assert:Equals(0, LENGTH(CoverSheetRules:ResolveQtyPallet(FALSE, 0.0, TRUE, "36":U))).
     END METHOD.
 
 END CLASS.
